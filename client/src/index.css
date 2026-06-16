@@ -1,0 +1,399 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Merriweather:wght@400;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Roboto+Slab:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply antialiased bg-background text-foreground;
+  }
+
+  /* Font classes */
+  .font-inter {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+
+  .font-merriweather {
+    font-family: 'Merriweather', Georgia, serif;
+  }
+
+  .font-poppins {
+    font-family: 'Poppins', -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+
+  .font-robotoSlab {
+    font-family: 'Roboto Slab', Georgia, serif;
+  }
+
+  /* Ensure .prose uses the selected font if a font-* class is present */
+  .prose.font-inter,
+  .prose.font-merriweather,
+  .prose.font-poppins,
+  .prose.font-robotoSlab {
+    font-family: inherit !important;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: hsl(var(--obsidian-sidebar));
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--obsidian-border));
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--obsidian-accent));
+  }
+
+  /* Markdown preview styles */
+  .markdown-preview {
+    @apply leading-relaxed;
+    color: hsl(var(--obsidian-text-muted));
+  }
+
+  .markdown-preview h1,
+  .markdown-preview h2,
+  .markdown-preview h3,
+  .markdown-preview h4,
+  .markdown-preview h5,
+  .markdown-preview h6 {
+    @apply font-semibold mb-4 mt-6;
+    color: hsl(var(--obsidian-text));
+  }
+
+  .markdown-preview h1 {
+    @apply text-2xl;
+  }
+
+  .markdown-preview h2 {
+    @apply text-xl;
+  }
+
+  .markdown-preview h3 {
+    @apply text-lg;
+  }
+
+  .markdown-preview p {
+    @apply mb-4 leading-7;
+  }
+
+  .markdown-preview ul,
+  .markdown-preview ol {
+    @apply mb-4 ml-6;
+  }
+
+  .markdown-preview li {
+    @apply mb-1;
+  }
+
+  .markdown-preview blockquote {
+    @apply border-l-4 pl-4 my-4 italic;
+    border-color: hsl(var(--obsidian-accent));
+    color: hsl(var(--obsidian-text-muted));
+  }
+
+  .markdown-preview code {
+    @apply px-1 py-0.5 rounded text-sm font-mono;
+    background-color: hsl(var(--obsidian-border));
+    color: hsl(var(--obsidian-accent));
+  }
+
+  .markdown-preview pre {
+    @apply p-4 rounded-lg overflow-x-auto mb-4;
+    background-color: hsl(var(--obsidian-panel));
+  }
+
+  .markdown-preview pre code {
+    @apply bg-transparent p-0;
+  }
+
+  .markdown-preview a {
+    color: hsl(var(--obsidian-accent));
+    @apply underline hover:opacity-80;
+  }
+
+  .markdown-preview table {
+    @apply w-full border-collapse mb-4;
+  }
+
+  .markdown-preview th,
+  .markdown-preview td {
+    @apply border px-3 py-2 text-left;
+    border-color: hsl(var(--obsidian-border));
+  }
+
+  .markdown-preview th {
+    @apply font-semibold;
+    background-color: hsl(var(--obsidian-panel));
+  }
+
+  /* Editor */
+  .editor-container {
+    background-color: hsl(var(--obsidian-bg));
+  }
+
+  .editor-textarea {
+    background-color: hsl(var(--obsidian-bg));
+    color: hsl(var(--obsidian-text));
+    font-family: inherit;
+  }
+
+  .editor-textarea::placeholder {
+    color: hsl(var(--obsidian-text-muted));
+  }
+
+  /* Resizer */
+  .resizer {
+    width: 4px;
+    background: transparent;
+    cursor: col-resize;
+    transition: background-color 0.2s;
+    border-right: 1px solid hsl(var(--obsidian-border));
+  }
+
+  .resizer:hover {
+    background: hsl(var(--obsidian-accent));
+  }
+
+  /* File tree styles */
+  .file-item {
+    @apply flex items-center p-2 rounded cursor-pointer transition-colors;
+  }
+
+  .file-item:hover {
+    background-color: hsl(var(--obsidian-panel));
+  }
+
+  .file-item.active {
+    background-color: hsl(var(--obsidian-accent) / 0.2);
+    border-left: 2px solid hsl(var(--obsidian-accent));
+  }
+
+  /* Collaboration styles */
+  .collaborator-avatar {
+    @apply w-6 h-6 rounded-full border-2 border-white flex items-center justify-center text-xs font-medium;
+  }
+
+  .collaborator-avatar:nth-child(1) {
+    background-color: hsl(var(--obsidian-accent));
+  }
+
+  .collaborator-avatar:nth-child(2) {
+    background-color: hsl(var(--obsidian-success));
+  }
+
+  .collaborator-avatar:nth-child(3) {
+    background-color: hsl(var(--obsidian-warning));
+  }
+
+  .collaborator-avatar:nth-child(4) {
+    background-color: hsl(var(--obsidian-error));
+  }
+}
+
+/* ────────────────────────────────────────────────────────────── */
+/*                         CORE VARIABLES (DARK THEME)           */
+/* ────────────────────────────────────────────────────────────── */
+:root {
+  --background: 225 6% 13%;
+  --foreground: 210 40% 98%;
+
+  --muted: 217 10% 18%;
+  --muted-foreground: 215 20.2% 65.1%;
+
+  --popover: 225 6% 13%;
+  --popover-foreground: 210 40% 98%;
+
+  --card: 217 10% 18%;
+  --card-foreground: 210 40% 98%;
+
+  --border: 217 33% 17%;
+  --input: 217 33% 17%;
+
+  --primary: 325 55% 45%;             /* brighter plum for dark backgrounds */
+  --primary-foreground: 210 40% 98%;
+  --secondary: 217 19% 27%;
+  --secondary-foreground: 210 40% 98%;
+  --accent: 325 55% 45%;
+  --accent-foreground: 210 40% 98%;
+
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 210 40% 98%;
+
+  --ring: 325 55% 45%;
+
+  --obsidian-bg: 225 6% 13%;
+  --obsidian-sidebar: 217 10% 18%;
+  --obsidian-panel: 217 19% 27%;
+  --obsidian-border: 217 33% 17%;
+  --obsidian-accent: 325 55% 45%;
+  --obsidian-success: 142 76% 36%;
+  --obsidian-error: 0 84% 60%;
+  --obsidian-warning: 45 93% 47%;
+  --obsidian-text: 210 40% 98%;
+  --obsidian-text-muted: 215 20.2% 65.1%;
+}
+
+/* ────────────────────────────────────────────────────────────── */
+/*                         PLUM-CREAM THEME                      */
+/* ────────────────────────────────────────────────────────────── */
+.plum-cream {
+  --background: 325 48% 19%;          /* plum purple */
+  --foreground: 43 77% 87%;           /* cream white */
+
+  --muted: 325 30% 25%;
+  --muted-foreground: 43 30% 75%;
+
+  --popover: 325 48% 19%;
+  --popover-foreground: 43 77% 87%;
+
+  --card: 325 30% 25%;
+  --card-foreground: 43 77% 87%;
+
+  --border: 325 30% 25%;
+  --input: 325 30% 25%;
+
+  /* Adjusted button/primary/accent for contrast */
+  --primary: 43 77% 87%;               /* cream white for button backgrounds */
+  --primary-foreground: 325 48% 19%;   /* plum purple text in buttons */
+  --secondary: 325 30% 25%;
+  --secondary-foreground: 43 77% 87%;
+  --accent: 43 77% 87%;                /* cream white for accent */
+  --accent-foreground: 325 48% 19%;    /* plum text in accent areas */
+
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 43 77% 87%;
+
+  --ring: 43 77% 87%;
+
+  /* Obsidian custom colors */
+  --obsidian-bg: 325 48% 19%;
+  --obsidian-sidebar: 325 30% 25%;
+  --obsidian-panel: 325 25% 22%;
+  --obsidian-border: 325 30% 25%;
+  --obsidian-accent: 43 77% 87%;        /* cream accent for light buttons on dark backgrounds */
+  --obsidian-success: 142 76% 36%;
+  --obsidian-error: 0 84% 60%;
+  --obsidian-warning: 45 93% 47%;
+  --obsidian-text: 43 77% 87%;
+  --obsidian-text-muted: 43 30% 75%;
+}
+
+/* ────────────────────────────────────────────────────────────── */
+/*                         CREAM (formerly "light")              */
+/* ────────────────────────────────────────────────────────────── */
+.cream {
+  --background: 43 77% 87%;          /* cream white */
+  --foreground: 225 6% 13%;         /* darker text for better contrast */
+
+  --muted: 43 40% 85%;
+  --muted-foreground: 225 6% 25%;   /* darker muted text */
+
+  --popover: 43 77% 87%;
+  --popover-foreground: 225 6% 13%;
+
+  --card: 43 77% 87%;
+  --card-foreground: 225 6% 13%;
+
+  --border: 43 40% 85%;
+  --input: 43 40% 85%;
+
+  /* Adjusted buttons for contrast in cream mode */
+  --primary: 325 48% 19%;             /* plum purple buttons */
+  --primary-foreground: 43 77% 87%;   /* cream text in buttons */
+  --secondary: 43 60% 80%;
+  --secondary-foreground: 225 6% 13%;  /* darker text */
+  --accent: 325 48% 19%;
+  --accent-foreground: 43 77% 87%;
+
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 43 77% 87%;
+
+  --ring: 325 48% 19%;
+
+  --obsidian-bg: 43 77% 87%;
+  --obsidian-sidebar: 43 60% 80%;
+  --obsidian-panel: 43 65% 83%;
+  --obsidian-border: 43 40% 85%;
+  --obsidian-accent: 325 48% 19%;
+  --obsidian-success: 142 76% 36%;
+  --obsidian-error: 0 84% 60%;
+  --obsidian-warning: 45 93% 47%;
+  --obsidian-text: 225 6% 13%;        /* darker text */
+  --obsidian-text-muted: 225 6% 25%;  /* darker muted text */
+}
+
+/* ────────────────────────────────────────────────────────────── */
+/*                         LIGHT (inverse of ".dark")            */
+/* ────────────────────────────────────────────────────────────── */
+/* This "light" theme swaps background ↔ foreground, muted ↔ muted-foreground, etc. */
+/* But keeps --primary, --accent, --ring, --obsidian-accent identical to .dark's values */
+.light {
+  /* Invert what .dark defines for everything except the four "fixed" vars below */
+  --background: 210 40% 98%;        /* the former dark-foreground becomes light-background */
+  --foreground: 225 6% 13%;         /* darker text for better contrast */
+
+  --muted: 215 20.2% 65.1%;         /* dark-muted-foreground → new (light-muted) */
+  --muted-foreground: 225 6% 25%;   /* darker muted text */
+
+  --popover: 210 40% 98%;
+  --popover-foreground: 225 6% 13%;
+
+  --card: 210 40% 98%;
+  --card-foreground: 225 6% 13%;
+
+  /* Add more contrast for borders and inputs */
+  --border: 215 25% 27%;
+  --input: 215 25% 27%;
+
+  /* ───────────────────────────────
+     The four vars forced to match .dark
+     ─────────────────────────────── */
+  --primary: 325 55% 45%;            /* same as .dark */
+  --accent: 325 55% 45%;             /* same as .dark */
+  --ring: 325 55% 45%;               /* same as .dark */
+  --obsidian-accent: 325 55% 45%;     /* same as .dark */
+
+  /* Their "-foreground" counterparts remain inverted as before */
+  --primary-foreground: 210 40% 98%;  /* dark → new (light-primary-foreground) */
+  --secondary: 217 19% 27%;           /* dark-secondary → new (light-secondary) */
+  --secondary-foreground: 225 6% 13%; /* darker text */
+  --accent-foreground: 210 40% 98%;   /* dark-accent-foreground → new */
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 210 40% 98%;
+
+  /* Keep the rest inverted but add more contrast for obsidian elements */
+  --obsidian-bg: 210 40% 98%;
+  --obsidian-sidebar: 210 35% 95%;    /* Slightly darker than bg for contrast */
+  --obsidian-panel: 210 30% 92%;      /* Even darker for panels */
+  --obsidian-border: 215 25% 27%;     /* Darker border for better visibility */
+  --obsidian-success: 142 76% 36%;
+  --obsidian-error: 0 84% 60%;
+  --obsidian-warning: 45 93% 47%;
+  --obsidian-text: 225 6% 13%;        /* darker text */
+  --obsidian-text-muted: 225 6% 25%;  /* darker muted text */
+}
+
+/* ────────────────────────────────────────────────────────────── */
+/*                           DARK MODE                            */
+/* ────────────────────────────────────────────────────────────── */
+/* Note: Dark mode is now the default theme in :root */
+.dark {
+  /* This class is kept for compatibility but uses the same values as :root */
+  /* All variables are inherited from :root */
+}
