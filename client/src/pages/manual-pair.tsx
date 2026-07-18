@@ -63,7 +63,7 @@ export default function ManualPairPage() {
   const [incomingOffer, setIncomingOffer] = useState("");
   const [answer, setAnswer] = useState("");
   const [incomingAnswer, setIncomingAnswer] = useState("");
-  const [status, setStatus] = useState("Manual pairing does not use Marktwin signaling.");
+  const [status, setStatus] = useState("This isolated transport lab does not use Marktwin signaling.");
 
   useEffect(() => {
     const observer = () => setContent(ytext.toString());
@@ -135,9 +135,12 @@ export default function ManualPairPage() {
     <div className="min-h-screen bg-[hsl(var(--obsidian-bg))] text-[hsl(var(--obsidian-text))] p-4">
       <div className="grid grid-cols-1 xl:grid-cols-[380px_1fr] gap-4">
         <section className="space-y-4">
+          <div className="rounded-md border border-amber-500/50 bg-amber-950/30 p-3 text-sm text-amber-100">
+            Technical demo only: this page pairs one temporary Yjs text document. It is not connected to an agent workspace, its files, discussion, roles, or Changes review.
+          </div>
           <Card className="bg-[hsl(var(--obsidian-panel))] border-[hsl(var(--obsidian-border))]">
             <CardHeader>
-              <CardTitle>Manual Pairing</CardTitle>
+              <CardTitle>Manual WebRTC transport lab</CardTitle>
               <CardDescription className="text-gray-400">{status}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -162,7 +165,7 @@ export default function ManualPairPage() {
 
         <Card className="bg-[hsl(var(--obsidian-panel))] border-[hsl(var(--obsidian-border))]">
           <CardHeader>
-            <CardTitle>Encrypted Manual Document</CardTitle>
+            <CardTitle>Temporary demo document</CardTitle>
             <CardDescription className="text-gray-400">Edits travel only over the manual WebRTC connection.</CardDescription>
           </CardHeader>
           <CardContent>

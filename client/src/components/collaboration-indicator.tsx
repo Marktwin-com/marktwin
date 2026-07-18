@@ -27,7 +27,7 @@ export default function CollaborationIndicator({ awareness, myName, onNameChange
         }));
 
       const signature = activeUsers
-        .map((user) => `${user.clientId}:${user.name}:${user.color || ""}`)
+        .map((user) => `${user.clientId}:${user.name}:${user.color || ""}:${user.role || ""}:${user.viewingFilePath || ""}`)
         .join("|");
       if (signature === userSignatureRef.current) return;
 
@@ -50,13 +50,16 @@ export default function CollaborationIndicator({ awareness, myName, onNameChange
       <div className="flex -space-x-1">
         {users.slice(0, 5).map((user, index) => {
           const isMe = user.clientId === awareness.clientID;
+          const label = `${user.name || "Anonymous"}${user.role ? `, ${user.role}` : ""}${user.viewingFilePath ? `, viewing ${user.viewingFilePath}` : ""}`;
           const avatar = (
-            <div 
+            <button
+              type="button"
               className={`w-6 h-6 rounded-full flex items-center justify-center text-white text-xs font-bold border border-[hsl(var(--obsidian-panel))] ${isMe ? 'cursor-pointer ring-2 ring-[hsl(var(--obsidian-accent))]' : ''}`}
               style={{ backgroundColor: user.color || '#10B981' }}
+              aria-label={label}
             >
               {user.name ? user.name.charAt(0).toUpperCase() : '?'}
-            </div>
+            </button>
           );
 
           if (isMe && onNameChange) {
@@ -81,11 +84,11 @@ export default function CollaborationIndicator({ awareness, myName, onNameChange
 
           return (
             <Tooltip key={index}>
-              <TooltipTrigger>
+              <TooltipTrigger asChild>
                 {avatar}
               </TooltipTrigger>
               <TooltipContent>
-                <p>{user.name || 'Anonymous'}</p>
+                <p>{label}</p>
               </TooltipContent>
             </Tooltip>
           );

@@ -22,8 +22,9 @@ async function sha256Base64Url(value: string) {
   return base64Url(new Uint8Array(digest));
 }
 
-export function configuredGitHubClientId() {
-  return import.meta.env.VITE_GITHUB_OAUTH_CLIENT_ID as string | undefined;
+export function configuredGitHubClientId(override?: string) {
+  const viteEnv = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env;
+  return override || viteEnv?.VITE_GITHUB_OAUTH_CLIENT_ID;
 }
 
 export function consumeGitHubOAuthToken() {
@@ -32,8 +33,8 @@ export function consumeGitHubOAuthToken() {
   return token;
 }
 
-export async function startGitHubOAuth(returnTo = "/app") {
-  const clientId = configuredGitHubClientId();
+export async function startGitHubOAuth(returnTo = "/app", clientIdOverride?: string) {
+  const clientId = configuredGitHubClientId(clientIdOverride);
   if (!clientId) throw new Error("VITE_GITHUB_OAUTH_CLIENT_ID is not configured.");
 
   const verifier = randomString(64);
@@ -54,13 +55,13 @@ export async function startGitHubOAuth(returnTo = "/app") {
   window.location.assign(`https://github.com/login/oauth/authorize?${params.toString()}`);
 }
 
-export async function completeGitHubOAuthFromLocation() {
+export async function completeGitHubOAuthFromLocation(clientIdOverride?: string) {
   const params = new URLSearchParams(window.location.search);
   const code = params.get("code");
   const state = params.get("state");
   const expectedState = sessionStorage.getItem(OAUTH_STATE_KEY);
   const verifier = sessionStorage.getItem(OAUTH_VERIFIER_KEY);
-  const clientId = configuredGitHubClientId();
+  const clientId = configuredGitHubClientId(clientIdOverride);
   const returnTo = sessionStorage.getItem(OAUTH_RETURN_KEY) || "/app";
 
   sessionStorage.removeItem(OAUTH_STATE_KEY);

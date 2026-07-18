@@ -1,6 +1,8 @@
 import { Button } from "@/components/ui/button";
-import { Download } from "lucide-react";
+import { Printer } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import DOMPurify from "dompurify";
+import { marked } from "marked";
 
 interface PDFDownloadButtonProps {
   markdown: string;
@@ -12,48 +14,39 @@ interface PDFDownloadButtonProps {
 export function PDFDownloadButton({ markdown, title, className, fontFamily }: PDFDownloadButtonProps) {
   const { toast } = useToast();
 
-  const handleDownload = async () => {
+  const handlePrint = () => {
     try {
-      const response = await fetch('/api/pdf/generate', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-        body: JSON.stringify({ markdown, title, fontFamily }),
+      const printWindow = window.open("", "_blank", "noopener,noreferrer");
+      if (!printWindow) throw new Error("The browser blocked the print window.");
+
+      const parsed = marked.parse(markdown, { gfm: true, breaks: true });
+      const safeHtml = DOMPurify.sanitize(typeof parsed === "string" ? parsed : "", {
+        FORBID_TAGS: ["img", "iframe", "object", "embed", "script", "style"],
+        FORBID_ATTR: ["style", "onerror", "onload"],
       });
+      const safeTitle = (title || "Marktwin document").replace(/[<>&"']/g, (character) => ({
+        "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;", "'": "&#039;",
+      })[character] || character);
+      const safeFont = fontFamily && /^[a-zA-Z0-9 ,'-]+$/.test(fontFamily) ? fontFamily : "system-ui, sans-serif";
 
-      if (!response.ok) {
-        throw new Error('Failed to generate PDF');
-      }
-
-      // Get the filename from the Content-Disposition header
-      const contentDisposition = response.headers.get('Content-Disposition');
-      const filenameMatch = contentDisposition?.match(/filename="(.+)"/);
-      const filename = filenameMatch ? filenameMatch[1] : 'document.pdf';
-
-      // Create a blob from the PDF data
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-
-      // Create a temporary link and trigger the download
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
-
-      toast({
-        title: "Success",
-        description: "PDF downloaded successfully",
-      });
+      printWindow.document.open();
+      printWindow.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${safeTitle}</title><style>
+        @page { margin: 18mm; }
+        body { color: #18181b; font: 15px/1.6 ${safeFont}; margin: 0 auto; max-width: 780px; }
+        h1,h2,h3 { line-height: 1.25; page-break-after: avoid; }
+        pre,code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+        pre { background: #f4f4f5; padding: 12px; overflow-wrap: anywhere; white-space: pre-wrap; }
+        blockquote { border-left: 3px solid #a1a1aa; margin-left: 0; padding-left: 16px; color: #52525b; }
+        table { border-collapse: collapse; width: 100%; } th,td { border: 1px solid #d4d4d8; padding: 6px; text-align: left; }
+        a { color: inherit; overflow-wrap: anywhere; }
+      </style></head><body>${safeHtml}</body></html>`);
+      printWindow.document.close();
+      printWindow.focus();
+      window.setTimeout(() => printWindow.print(), 50);
     } catch (error) {
-      console.error('PDF download error:', error);
       toast({
-        title: "Error",
-        description: "Failed to download PDF. Please try again.",
+        title: "Could not open print view",
+        description: error instanceof Error ? error.message : "Allow pop-ups and try again.",
         variant: "destructive",
       });
     }
@@ -61,12 +54,13 @@ export function PDFDownloadButton({ markdown, title, className, fontFamily }: PD
 
   return (
     <Button
-      onClick={handleDownload}
+      onClick={handlePrint}
       variant="ghost"
       size="sm"
-      className={className + ' text-sm font-normal w-full justify-start cursor-pointer'}
+      className={(className || "") + " text-sm font-normal w-full justify-start cursor-pointer"}
     >
-      Download PDF
+      <Printer className="mr-2 h-4 w-4" />
+      Print / Save as PDF
     </Button>
   );
-} 
+}

@@ -2,7 +2,6 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { WebSocket, WebSocketServer } from "ws";
 import { z } from "zod";
-import pdfRouter from "./routes/pdf.js";
 
 type SignalSocket = WebSocket & {
   roomHash?: string;
@@ -11,8 +10,6 @@ type SignalSocket = WebSocket & {
 };
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  app.use("/api/pdf", pdfRouter);
-
   app.all("/api/*", (_req, res) => res.status(404).json({ message: "Not found" }));
 
   const httpServer = createServer(app);

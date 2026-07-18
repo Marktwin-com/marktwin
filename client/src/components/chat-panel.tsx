@@ -1,30 +1,22 @@
 import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Send, X } from "lucide-react";
-import * as Y from "yjs";
+import { BookmarkPlus, FileText, Send, X } from "lucide-react";
+import type { ChatMessage, DiscussionAnchor } from "@shared/schema";
 
 interface ChatPanelProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   width: number;
   onWidthChange: (width: number) => void;
-  ydoc: Y.Doc;
+  messages: ChatMessage[];
+  onSend: (message: ChatMessage) => void;
   username?: string;
   userColor?: string;
   clientId?: string;
+  anchor?: DiscussionAnchor;
+  onCaptureDecision?: (message: ChatMessage) => void;
 }
-
-export interface ChatMessage {
-  id: string;
-  sessionId: string;
-  username: string;
-  message: string;
-  timestamp: number;
-  color: string;
-}
-
-const MAX_VISIBLE_CHAT_MESSAGES = 200;
 
 function createMessageId() {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -32,13 +24,8 @@ function createMessageId() {
     : Math.random().toString(36).slice(2);
 }
 
-function appendVisibleMessage(messages: ChatMessage[], message: ChatMessage) {
-  return [...messages, message].slice(-MAX_VISIBLE_CHAT_MESSAGES);
-}
-
-export default function ChatPanel({ open, onOpenChange, width, onWidthChange, ydoc, username: propUsername, userColor: propUserColor, clientId }: ChatPanelProps) {
+export default function ChatPanel({ open, onOpenChange, width, onWidthChange, messages, onSend, username: propUsername, userColor: propUserColor, clientId, anchor, onCaptureDecision }: ChatPanelProps) {
   const [chatMessage, setChatMessage] = useState("");
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [username] = useState(`User${Math.random().toString(36).substring(2, 6)}`);
   const [userColor] = useState(`#${Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0')}`);
   const chatRef = useRef<HTMLDivElement>(null);
@@ -66,24 +53,9 @@ export default function ChatPanel({ open, onOpenChange, width, onWidthChange, yd
     };
   }, []);
 
-  // P2P Yjs Chat
   useEffect(() => {
-    if (!open || !ydoc) return;
-    
-    const messagesArray = ydoc.getArray<ChatMessage>('chat-messages');
-    
-    const updateMessages = () => {
-      setChatMessages(messagesArray.toArray().slice(-MAX_VISIBLE_CHAT_MESSAGES));
-      scrollToBottom();
-    };
-
-    messagesArray.observe(updateMessages);
-    updateMessages();
-
-    return () => {
-      messagesArray.unobserve(updateMessages);
-    };
-  }, [open, ydoc]);
+    if (open) scrollToBottom();
+  }, [messages, open]);
 
   const sendChatMessage = () => {
     if (!chatMessage.trim()) return;
@@ -94,14 +66,10 @@ export default function ChatPanel({ open, onOpenChange, width, onWidthChange, yd
       username: propUsername || username,
       message: chatMessage.trim(),
       timestamp: Date.now(),
-      color: propUserColor || userColor
+      color: propUserColor || userColor,
+      anchor,
     };
-
-    const messagesArray = ydoc.getArray<ChatMessage>('chat-messages');
-    ydoc.transact(() => {
-      messagesArray.push([message]);
-    }, 'chat-message');
-
+    onSend(message);
     setChatMessage("");
   };
 
@@ -111,7 +79,7 @@ export default function ChatPanel({ open, onOpenChange, width, onWidthChange, yd
     <>
       {/* Resizer */}
       <div 
-        className="resizer"
+        className="resizer hidden sm:block"
         style={{ 
           position: 'fixed',
           right: `${width}px`,
@@ -155,12 +123,15 @@ export default function ChatPanel({ open, onOpenChange, width, onWidthChange, yd
           document.addEventListener("mousemove", handleMouseMove);
           document.addEventListener("mouseup", handleMouseUp);
         }}
+        role="separator"
+        aria-label="Resize discussion panel"
+        aria-orientation="vertical"
       />
 
       <div 
         className="chat-panel fixed right-0 top-0 h-screen bg-[hsl(var(--obsidian-bg))] border-l border-[hsl(var(--obsidian-border))] flex flex-col z-40 transition-all duration-300"
         style={{ 
-          width: `${width}px`,
+          width: `min(100vw, ${width}px)`,
           minWidth: '200px',
           maxWidth: '600px',
           overflow: 'hidden'
@@ -168,12 +139,13 @@ export default function ChatPanel({ open, onOpenChange, width, onWidthChange, yd
       >
         {/* Header */}
         <div className="p-4 border-b border-[hsl(var(--obsidian-border))] flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-foreground">Chat</h2>
+          <h2 className="text-lg font-semibold text-foreground">Discussion</h2>
           <Button
             variant="ghost"
             size="icon"
             onClick={() => onOpenChange(false)}
             className="h-8 w-8 text-gray-400 hover:text-white"
+            aria-label="Close discussion"
           >
             <X className="h-4 w-4" />
           </Button>
@@ -184,7 +156,7 @@ export default function ChatPanel({ open, onOpenChange, width, onWidthChange, yd
           ref={chatRef} 
           className="flex-1 overflow-y-auto space-y-3 p-4"
         >
-          {chatMessages.map((msg) => (
+          {messages.map((msg) => (
             <div key={msg.id} className="flex items-start gap-2">
               <div 
                 className="w-6 h-6 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0" 
@@ -200,10 +172,24 @@ export default function ChatPanel({ open, onOpenChange, width, onWidthChange, yd
                   </span>
                 </div>
                 <p className="text-sm break-words">{msg.message}</p>
+                {msg.anchor && (
+                  <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+                    <FileText className="h-3 w-3" />{msg.anchor.filePath}{msg.anchor.heading ? ` · ${msg.anchor.heading}` : ""}
+                  </p>
+                )}
+                {onCaptureDecision && (
+                  <button
+                    type="button"
+                    className="mt-2 inline-flex items-center gap-1 text-xs text-[hsl(var(--obsidian-accent))] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    onClick={() => onCaptureDecision(msg)}
+                  >
+                    <BookmarkPlus className="h-3 w-3" />Capture decision
+                  </button>
+                )}
               </div>
             </div>
           ))}
-          {chatMessages.length === 0 && (
+          {messages.length === 0 && (
             <div className="text-center text-muted-foreground text-sm py-8">
               No messages yet. Start a conversation!
             </div>
@@ -223,12 +209,14 @@ export default function ChatPanel({ open, onOpenChange, width, onWidthChange, yd
                 }
               }}
               placeholder="Type a message..."
+              aria-label="Discussion message"
               className="bg-[hsl(var(--obsidian-panel))] border-[hsl(var(--obsidian-border))] text-white"
             />
             <Button
               onClick={sendChatMessage}
               disabled={!chatMessage.trim()}
               className="bg-primary hover:bg-primary/90 text-primary-foreground"
+              aria-label="Send discussion message"
             >
               <Send className="h-4 w-4" />
             </Button>

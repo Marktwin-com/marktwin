@@ -5,9 +5,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Github, Plus, FolderOpen, Trash2 } from "lucide-react";
-import { getSavedRepos, addSavedRepo, deleteSavedRepo, type SavedRepoLocal } from "@/lib/saved-repos";
+import { ConfirmDialog } from "@/components/confirm-dialog";
+import { getSavedRepos, addSavedRepo, deleteSavedRepo, updateSavedRepo, type SavedRepoLocal } from "@/lib/saved-repos";
+import { GitHubApiError, createPrivateRepository, getAuthenticatedUser, getBranch, getRepository, parseRepo } from "@/lib/browser-github";
+import { configuredGitHubClientId, consumeGitHubOAuthToken, startGitHubOAuth } from "@/lib/github-oauth-pkce";
+
+const OAUTH_REPO_KEY = "marktwin.githubOAuthRepoId";
 
 export default function MyCabinets() {
   const [, setLocation] = useLocation();
@@ -17,6 +22,11 @@ export default function MyCabinets() {
   const [tokenDialogOpen, setTokenDialogOpen] = useState(false);
   const [selectedRepo, setSelectedRepo] = useState<SavedRepoLocal | null>(null);
   const [token, setToken] = useState("");
+  const [tokenError, setTokenError] = useState("");
+  const [validatingToken, setValidatingToken] = useState(false);
+  const [missingRepo, setMissingRepo] = useState(false);
+  const [creationLogin, setCreationLogin] = useState("");
+  const [repoToRemove, setRepoToRemove] = useState<SavedRepoLocal | null>(null);
 
   // Add repo dialog state
   const [addDialogOpen, setAddDialogOpen] = useState(false);
@@ -25,28 +35,122 @@ export default function MyCabinets() {
   const [addError, setAddError] = useState("");
 
   useEffect(() => {
-    setRepos(getSavedRepos());
+    const saved = getSavedRepos();
+    setRepos(saved);
+    const oauthToken = consumeGitHubOAuthToken();
+    const oauthRepoId = Number(sessionStorage.getItem(OAUTH_REPO_KEY));
+    if (oauthToken && oauthRepoId) {
+      const repo = saved.find((candidate) => candidate.id === oauthRepoId);
+      sessionStorage.removeItem(OAUTH_REPO_KEY);
+      if (repo) {
+        setSelectedRepo(repo);
+        setToken(oauthToken);
+        setTokenDialogOpen(true);
+      }
+    }
   }, []);
 
   const handleOpenCabinet = (repo: SavedRepoLocal) => {
     setSelectedRepo(repo);
     const repoName = repo.repoFullName.split('/')[1] || repo.repoFullName;
-    const saved = sessionStorage.getItem(`gh-token-${repoName}`);
+    const saved = sessionStorage.getItem(`gh-token-${repo.id}`) || sessionStorage.getItem(`gh-token-${repoName}`);
     setToken(saved || "");
+    setTokenError("");
+    setMissingRepo(false);
     setTokenDialogOpen(true);
   };
 
-  const handleEnterCabinet = () => {
-    if (!selectedRepo || !token.trim()) return;
-    const repoName = selectedRepo.repoFullName.split('/')[1] || selectedRepo.repoFullName;
-    sessionStorage.setItem(`gh-token-${repoName}`, token.trim());
+  const enterValidatedCabinet = (repo: SavedRepoLocal, tokenValue: string) => {
+    sessionStorage.setItem(`gh-token-${repo.id}`, tokenValue);
     setTokenDialogOpen(false);
-    setLocation(`/cabinet/${repoName}`);
+    setLocation(`/cabinet/${repo.id}`);
+  };
+
+  const handleEnterCabinet = async () => {
+    if (!selectedRepo || !token.trim()) return;
+    setTokenError("");
+    setMissingRepo(false);
+    setValidatingToken(true);
+    let repositoryValidated = false;
+    try {
+      const repository = await getRepository(token.trim(), selectedRepo.repoFullName);
+      repositoryValidated = true;
+      try {
+        await getBranch(token.trim(), repository.fullName, selectedRepo.defaultBranch);
+      } catch (error) {
+        if (error instanceof GitHubApiError && error.status === 404) {
+          setTokenError(selectedRepo.defaultBranch !== repository.defaultBranch
+            ? `Branch '${selectedRepo.defaultBranch}' was not found. Use GitHub's default branch '${repository.defaultBranch}' instead.`
+            : `Branch '${selectedRepo.defaultBranch}' was not found in '${repository.fullName}'.`);
+          return;
+        }
+        throw error;
+      }
+      enterValidatedCabinet(selectedRepo, token.trim());
+    } catch (error) {
+      if (error instanceof GitHubApiError && error.status === 404 && !repositoryValidated) {
+        setMissingRepo(true);
+        setTokenError(`The repository '${selectedRepo.repoFullName}' was not found or this token cannot access it.`);
+        try {
+          setCreationLogin((await getAuthenticatedUser(token.trim())).login);
+        } catch {
+          setCreationLogin("");
+        }
+      } else if (error instanceof GitHubApiError && error.status === 401) {
+        setTokenError("GitHub rejected this token. Check it and try again.");
+      } else if (error instanceof GitHubApiError && error.status === 403) {
+        setTokenError("This token does not have permission to access the repository.");
+      } else {
+        setTokenError(error instanceof Error ? error.message : "GitHub validation failed.");
+      }
+    } finally {
+      setValidatingToken(false);
+    }
+  };
+
+  const handleUseDefaultBranch = async () => {
+    if (!selectedRepo || !token.trim()) return;
+    setValidatingToken(true);
+    try {
+      const repository = await getRepository(token.trim(), selectedRepo.repoFullName);
+      const updated = { ...selectedRepo, defaultBranch: repository.defaultBranch };
+      updateSavedRepo(selectedRepo.id, { defaultBranch: repository.defaultBranch });
+      setRepos(getSavedRepos());
+      enterValidatedCabinet(updated, token.trim());
+    } catch (error) {
+      setTokenError(error instanceof Error ? error.message : "Could not use the default branch.");
+    } finally {
+      setValidatingToken(false);
+    }
+  };
+
+  const handleCreateMissingRepository = async () => {
+    if (!selectedRepo || !token.trim()) return;
+    setValidatingToken(true);
+    try {
+      const { repo } = parseRepo(selectedRepo.repoFullName);
+      const created = await createPrivateRepository(token.trim(), repo);
+      const updated = updateSavedRepo(selectedRepo.id, {
+        displayName: created.fullName,
+        repoFullName: created.fullName,
+        defaultBranch: created.defaultBranch,
+        selectedRootScopes: [".agents"],
+      });
+      if (!updated) throw new Error("Could not update the saved cabinet.");
+      setRepos(getSavedRepos());
+      enterValidatedCabinet(updated, token.trim());
+    } catch (error) {
+      setTokenError(error instanceof Error ? error.message : "Could not create the repository.");
+    } finally {
+      setValidatingToken(false);
+    }
   };
 
   const handleAddRepo = () => {
     setAddError("");
-    if (!newRepoName.trim().includes("/")) {
+    try {
+      parseRepo(newRepoName);
+    } catch {
       setAddError("Use owner/repo format (e.g. acme/docs)");
       return;
     }
@@ -59,6 +163,18 @@ export default function MyCabinets() {
     setNewRepoName("");
     setNewRepoBranch("main");
     setAddDialogOpen(false);
+    handleOpenCabinet(repo);
+  };
+
+  const handleOAuth = async () => {
+    if (!selectedRepo) return;
+    sessionStorage.setItem(OAUTH_REPO_KEY, String(selectedRepo.id));
+    try {
+      await startGitHubOAuth("/my-cabinets");
+    } catch (error) {
+      sessionStorage.removeItem(OAUTH_REPO_KEY);
+      setTokenError(error instanceof Error ? error.message : "Could not start GitHub OAuth.");
+    }
   };
 
   const handleDeleteRepo = (repoId: number) => {
@@ -69,29 +185,24 @@ export default function MyCabinets() {
 
   return (
     <Layout>
-      <div className="max-w-3xl mx-auto">
-        <div className="flex items-center justify-between mb-8">
+      <div className="max-w-3xl mx-auto min-w-0">
+        <div className="mb-8 flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
           <div>
-            <h1 className="text-3xl font-bold text-[hsl(var(--obsidian-text))]">My Cabinets</h1>
+            <h1 className="text-3xl font-bold text-[hsl(var(--obsidian-text))]">Agent workspaces</h1>
             <p className="text-[hsl(var(--obsidian-text-muted))] mt-1">
-              Open a GitHub repository with a personal access token. The token is kept in this
-              browser's session storage only and is never sent to a server.
+              Think together about agent rules, skills, tools, boundaries, and decisions—then review and publish the result to GitHub.
             </p>
           </div>
           <Button onClick={() => setAddDialogOpen(true)} className="bg-primary hover:bg-primary/90">
             <Plus className="h-4 w-4 mr-2" />
-            New Cabinet
+            Connect repository
           </Button>
         </div>
 
         {repos.length === 0 ? (
           <div className="text-center py-16">
             <Github className="h-12 w-12 mx-auto mb-4 text-[hsl(var(--obsidian-text-muted))] opacity-50" />
-            <p className="text-[hsl(var(--obsidian-text-muted))] mb-4">No cabinets yet. Add a GitHub repository to get started.</p>
-            <Button onClick={() => setAddDialogOpen(true)} variant="outline">
-              <Plus className="h-4 w-4 mr-2" />
-              Create your first cabinet
-            </Button>
+            <p className="text-[hsl(var(--obsidian-text-muted))] mb-4">Connect a repository to create your first collaborative agent workspace.</p>
           </div>
         ) : (
           <div className="grid gap-3">
@@ -100,7 +211,7 @@ export default function MyCabinets() {
                 key={repo.id}
                 className="bg-[hsl(var(--obsidian-sidebar))] border-[hsl(var(--obsidian-border))] hover:border-primary/50 transition-colors group"
               >
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 p-4">
+                <CardHeader className="flex flex-col items-stretch justify-between gap-3 space-y-0 p-4 sm:flex-row sm:items-center">
                   <div className="flex items-center gap-3 min-w-0">
                     <Github className="h-5 w-5 text-[hsl(var(--obsidian-text-muted))] flex-shrink-0" />
                     <div className="min-w-0">
@@ -112,16 +223,17 @@ export default function MyCabinets() {
                       </CardDescription>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
+                  <div className="flex items-center justify-end gap-2 flex-shrink-0">
                     <Button
                       size="sm"
                       variant="ghost"
-                      className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                      className="text-red-400 hover:text-red-300 hover:bg-red-500/10 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100"
                       onClick={(e) => {
                         e.stopPropagation();
-                        handleDeleteRepo(repo.id);
+                        setRepoToRemove(repo);
                       }}
                       title="Remove repository"
+                      aria-label={`Remove ${repo.displayName} from this browser`}
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
@@ -131,7 +243,7 @@ export default function MyCabinets() {
                       className="bg-primary hover:bg-primary/90"
                     >
                       <FolderOpen className="h-4 w-4 mr-2" />
-                      Open Cabinet
+                      Open workspace
                     </Button>
                   </div>
                 </CardHeader>
@@ -149,36 +261,60 @@ export default function MyCabinets() {
               <Github className="h-5 w-5" />
               {selectedRepo?.displayName}
             </DialogTitle>
+            <DialogDescription>
+              Marktwin validates the repository and branch directly with GitHub before opening the workspace.
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="bg-[hsl(var(--obsidian-panel))] rounded-lg p-3 text-sm text-[hsl(var(--obsidian-text-muted))]">
               Your token is stored only in this browser's session storage and is never sent to a server.
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="gh-token">GitHub Token (PAT or OAuth)</Label>
+            {configuredGitHubClientId() && <Button className="w-full" onClick={() => void handleOAuth()}><Github className="mr-2 h-4 w-4" />Continue with GitHub</Button>}
+            <details open={!configuredGitHubClientId()} className="rounded-md border border-[hsl(var(--obsidian-border))] p-3">
+              <summary className="cursor-pointer text-sm font-medium">Use a personal access token <span className="font-normal text-muted-foreground">(advanced)</span></summary>
+            <div className="mt-3 space-y-2">
+              <Label htmlFor="gh-token">GitHub personal access token</Label>
               <Input
                 id="gh-token"
                 type="password"
                 value={token}
                 onChange={(e) => setToken(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleEnterCabinet()}
+                onKeyDown={(e) => e.key === "Enter" && void handleEnterCabinet()}
                 placeholder="ghp_…"
-                autoComplete="current-password"
+                autoComplete="off"
                 className="bg-[hsl(var(--obsidian-bg))] border-[hsl(var(--obsidian-border))]"
               />
+              <p className="text-xs text-muted-foreground">Fine-grained tokens need Contents read/write for Sync. Creating a missing private repository also requires Administration write permission.</p>
             </div>
+            </details>
+            {tokenError && <p className="text-sm text-red-400">{tokenError}</p>}
+            {missingRepo && (
+              <p className="text-xs text-[hsl(var(--obsidian-text-muted))]">
+                Create a private repository under {creationLogin || "the authenticated account"}. Marktwin will seed <code>.agents/README.md</code> and retarget this cabinet if the owner name differs.
+              </p>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setTokenDialogOpen(false)}>
               Cancel
             </Button>
+            {tokenError.includes("default branch") && !missingRepo && (
+              <Button variant="outline" onClick={() => void handleUseDefaultBranch()} disabled={validatingToken}>
+                Use default branch
+              </Button>
+            )}
+            {missingRepo && (
+              <Button variant="outline" onClick={() => void handleCreateMissingRepository()} disabled={validatingToken}>
+                Create private repository
+              </Button>
+            )}
             <Button
-              onClick={handleEnterCabinet}
-              disabled={!token.trim()}
+              onClick={() => void handleEnterCabinet()}
+              disabled={!token.trim() || validatingToken}
               className="bg-primary hover:bg-primary/90"
             >
               <FolderOpen className="h-4 w-4 mr-2" />
-              Enter Cabinet
+              Validate and open
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -188,7 +324,8 @@ export default function MyCabinets() {
       <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
         <DialogContent className="bg-[hsl(var(--obsidian-sidebar))] border-[hsl(var(--obsidian-border))]">
           <DialogHeader>
-            <DialogTitle>New Cabinet</DialogTitle>
+            <DialogTitle>Connect repository</DialogTitle>
+            <DialogDescription>Step 1 of 2 · Choose the repository. Next, connect GitHub and validate access.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-2">
@@ -222,11 +359,23 @@ export default function MyCabinets() {
               disabled={!newRepoName.trim()}
               className="bg-primary hover:bg-primary/90"
             >
-              New Cabinet
+              Continue
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={Boolean(repoToRemove)}
+        onOpenChange={(open) => { if (!open) setRepoToRemove(null); }}
+        title="Remove workspace from this browser?"
+        description={`This removes '${repoToRemove?.displayName || "the workspace"}' from this browser only. It does not delete the GitHub repository.`}
+        confirmText="Remove workspace"
+        onConfirm={() => {
+          if (repoToRemove) handleDeleteRepo(repoToRemove.id);
+          setRepoToRemove(null);
+        }}
+      />
     </Layout>
   );
 }

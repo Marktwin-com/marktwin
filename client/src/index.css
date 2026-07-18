@@ -1,8 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Merriweather:wght@400;700&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Roboto+Slab:wght@400;500;600&display=swap');
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -14,31 +9,6 @@
 
   body {
     @apply antialiased bg-background text-foreground;
-  }
-
-  /* Font classes */
-  .font-inter {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  }
-
-  .font-merriweather {
-    font-family: 'Merriweather', Georgia, serif;
-  }
-
-  .font-poppins {
-    font-family: 'Poppins', -apple-system, BlinkMacSystemFont, sans-serif;
-  }
-
-  .font-robotoSlab {
-    font-family: 'Roboto Slab', Georgia, serif;
-  }
-
-  /* Ensure .prose uses the selected font if a font-* class is present */
-  .prose.font-inter,
-  .prose.font-merriweather,
-  .prose.font-poppins,
-  .prose.font-robotoSlab {
-    font-family: inherit !important;
   }
 
   /* Custom scrollbar */

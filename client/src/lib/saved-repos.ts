@@ -4,6 +4,7 @@ export interface SavedRepoLocal {
   displayName: string;
   repoFullName: string;
   defaultBranch: string;
+  selectedRootScopes?: string[];
   createdAt: string;
 }
 
@@ -30,12 +31,14 @@ export function addSavedRepo(input: {
   displayName: string;
   repoFullName: string;
   defaultBranch: string;
+  selectedRootScopes?: string[];
 }): SavedRepoLocal {
   const repo: SavedRepoLocal = {
     id: Date.now(),
     displayName: input.displayName,
     repoFullName: input.repoFullName,
     defaultBranch: input.defaultBranch || "main",
+    selectedRootScopes: input.selectedRootScopes,
     createdAt: new Date().toISOString(),
   };
   writeAll([...readAll(), repo]);
@@ -44,7 +47,7 @@ export function addSavedRepo(input: {
 
 export function updateSavedRepo(
   id: number,
-  updates: Partial<Pick<SavedRepoLocal, "displayName" | "repoFullName" | "defaultBranch">>,
+  updates: Partial<Pick<SavedRepoLocal, "displayName" | "repoFullName" | "defaultBranch" | "selectedRootScopes">>,
 ): SavedRepoLocal | undefined {
   const repos = readAll();
   const index = repos.findIndex((repo) => repo.id === id);

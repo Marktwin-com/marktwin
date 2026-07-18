@@ -4,7 +4,6 @@ import { Maximize2, Minimize2, Eye, Edit2, FlipVertical } from "lucide-react";
 import type { Note } from "@shared/schema";
 import MarkdownPreview from "./markdown-preview";
 import { cn } from "@/lib/utils";
-import FilePreview from './file-preview';
 import * as Y from "yjs";
 import { Awareness } from "y-protocols/awareness";
 import CodeMirror, { ReactCodeMirrorRef } from '@uiw/react-codemirror';
@@ -16,9 +15,7 @@ interface SimpleCollaborativeEditorProps {
   note: Note;
   onContentChange: (content: string) => void;
   onModeChange: (mode: "raw" | "preview") => void;
-  vaultId: number;
   mode: "raw" | "preview";
-  vaultSlug: string;
   onSplitView?: () => void;
   readOnly?: boolean;
   isSplitPane?: boolean;
@@ -30,9 +27,7 @@ export default function SimpleCollaborativeEditor({
   note, 
   onContentChange,
   onModeChange,
-  vaultId,
   mode,
-  vaultSlug,
   onSplitView,
   readOnly = false,
   isSplitPane = false,
@@ -93,9 +88,6 @@ export default function SimpleCollaborativeEditor({
     }
   }, [mode, ytext]);
 
-  const isImage = /\.(jpg|jpeg|png|gif|svg)$/i.test(note.filename);
-  const isPdf = /\.pdf$/i.test(note.filename);
-
   const undoManager = useMemo(() => (ytext ? new Y.UndoManager(ytext) : null), [ytext]);
 
   const extensions = useMemo(() => {
@@ -142,16 +134,6 @@ export default function SimpleCollaborativeEditor({
     setContent(note.content);
   }, [note.id, note.content, ytext]);
 
-  // If it's an image or PDF, we don't need the editor
-  if (isImage || isPdf) {
-    return (
-      <FilePreview
-        file={note}
-        vaultSlug={vaultSlug}
-      />
-    );
-  }
-
   const editorValue = ytext ? collabInitialValue : content;
   const editorKey = ytext ? `collab-${note.id}-${editorVersion}` : `plain-${note.id}`;
   const codeMirrorTheme = theme === "cream" || theme === "light" ? "light" : "dark";
@@ -192,8 +174,8 @@ export default function SimpleCollaborativeEditor({
               variant="ghost"
               size="sm"
               onClick={onSplitView}
-              className="flex items-center gap-2 text-[hsl(var(--obsidian-text-muted))] hover:text-[hsl(var(--obsidian-text))] hover:bg-[hsl(var(--obsidian-panel-hover))] px-3"
-              title="Open in split view (⌘+S)"
+              className="hidden items-center gap-2 text-[hsl(var(--obsidian-text-muted))] hover:text-[hsl(var(--obsidian-text))] hover:bg-[hsl(var(--obsidian-panel-hover))] px-3 sm:flex"
+              title="Open in split view"
             >
               <FlipVertical className="h-4 w-4" />
               <span className="font-medium">Split View</span>
@@ -206,6 +188,7 @@ export default function SimpleCollaborativeEditor({
             size="sm"
             onClick={handleToggleFullscreen}
             className="flex items-center gap-2 text-[hsl(var(--obsidian-text-muted))] hover:text-[hsl(var(--obsidian-text))] hover:bg-[hsl(var(--obsidian-panel-hover))]"
+            aria-label={isFullscreen ? "Exit fullscreen editor" : "Open fullscreen editor"}
           >
             {isFullscreen ? (
               <>
@@ -236,6 +219,7 @@ export default function SimpleCollaborativeEditor({
             extensions={extensions}
             onChange={ytext ? undefined : handlePlainChange}
             readOnly={readOnly}
+            editable={!readOnly}
             theme={codeMirrorTheme}
             className="w-full h-full text-[15px] [&>.cm-editor]:h-full [&>.cm-editor]:outline-none [&_.cm-scroller]:font-mono [&_.cm-scroller]:p-4 [&_.cm-ySelectionInfo]:opacity-100 [&_.cm-ySelectionInfo]:font-sans [&_.cm-ySelectionInfo]:text-xs [&_.cm-ySelectionInfo]:px-1 [&_.cm-ySelectionInfo]:py-0.5 [&_.cm-ySelectionInfo]:rounded"
           />
@@ -243,8 +227,6 @@ export default function SimpleCollaborativeEditor({
           <div className="h-full overflow-auto bg-[hsl(var(--obsidian-bg))]">
             <MarkdownPreview
               content={content}
-              vaultSlug={vaultSlug}
-              notePath={note.path}
             />
           </div>
         )}

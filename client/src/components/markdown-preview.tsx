@@ -11,15 +11,11 @@ marked.setOptions({
 
 interface MarkdownPreviewProps {
   content: string;
-  vaultSlug: string;
-  notePath: string;
   className?: string;
 }
 
 export default function MarkdownPreview({
   content,
-  vaultSlug,
-  notePath,
   className
 }: MarkdownPreviewProps) {
   const renderedHtml = useMemo(() => {
@@ -33,7 +29,8 @@ export default function MarkdownPreview({
     // Sanitize HTML
     const sanitizedHtml = DOMPurify.sanitize(rawHtml);
 
-    // Parse HTML to rewrite relative image paths
+    // Repository assets are intentionally outside the Markdown-only cabinet.
+    // Keep remote/data images, but do not generate URLs for removed server file routes.
     if (typeof window !== 'undefined') {
       const parser = new DOMParser();
       const doc = parser.parseFromString(sanitizedHtml, 'text/html');
@@ -48,23 +45,8 @@ export default function MarkdownPreview({
           !src.startsWith('/') && 
           !src.startsWith('data:')
         ) {
-          // Resolve relative path against notePath
-          let resolvedPath = '';
-          const cleanNotePath = notePath ? notePath.replace(/^\/+|\/+$/g, '') : '';
-          
-          if (src.startsWith('./')) {
-            resolvedPath = cleanNotePath ? `${cleanNotePath}/${src.slice(2)}` : src.slice(2);
-          } else if (src.startsWith('../')) {
-            const parts = cleanNotePath.split('/').filter(Boolean);
-            parts.pop(); // Go up one level
-            resolvedPath = [...parts, src.replace(/^\.\.\//, '')].join('/');
-          } else {
-            resolvedPath = cleanNotePath ? `${cleanNotePath}/${src}` : src;
-          }
-
-          // Clean up double slashes and resolve final API URL
-          resolvedPath = resolvedPath.replace(/\/+/g, '/').replace(/^\//, '');
-          img.setAttribute('src', `/api/vaults/${vaultSlug}/files/${resolvedPath}`);
+          img.removeAttribute('src');
+          img.setAttribute('title', 'Local repository assets are not loaded in this Markdown-only cabinet.');
         }
       });
 
@@ -72,7 +54,7 @@ export default function MarkdownPreview({
     }
 
     return sanitizedHtml;
-  }, [content, vaultSlug, notePath]);
+  }, [content]);
 
   return (
     <div 

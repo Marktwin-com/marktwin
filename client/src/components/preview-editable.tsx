@@ -32,7 +32,7 @@ interface PreviewEditableProps {
   content: string;
   onUpdate: (content: string) => void;
   vaultId: number;
-  noteId: number;
+  noteId: string;
   sessionId: string;
   wsRef: React.MutableRefObject<WebSocket | undefined>;
 }

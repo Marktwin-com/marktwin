@@ -11,8 +11,13 @@ import {
   randomSecret,
 } from "./private-crypto";
 import { createPeerConnection } from "./webrtc-config";
+import type { ChatMessage, OwnerControlMessage, SessionState } from "@shared/schema";
 
 export type SessionPermission = "edit" | "view";
+
+export function canEditSession(permission: SessionPermission) {
+  return permission === "edit";
+}
 
 export interface InvitePayload {
   v: 1;
@@ -35,10 +40,40 @@ type PeerSignal =
 type EncryptedPayload =
   | { type: "state-request"; stateVector?: string }
   | { type: "y-update"; update: string }
-  | { type: "awareness"; update: string };
+  | { type: "awareness"; update: string }
+  | { type: "chat"; message: ChatMessage }
+  | { type: "control"; message: OwnerControlMessage };
 
 const UPDATE_BATCH_DELAY_MS = 16;
 const MAX_BUFFERED_AMOUNT = 1_000_000;
+const RECONNECT_DELAY_MS = 3000;
+
+function validChatMessage(value: unknown): value is ChatMessage {
+  if (!value || typeof value !== "object") return false;
+  const message = value as ChatMessage;
+  return (
+    typeof message.id === "string" && message.id.length <= 100 &&
+    typeof message.sessionId === "string" && message.sessionId.length <= 100 &&
+    typeof message.username === "string" && message.username.length <= 80 &&
+    typeof message.message === "string" && message.message.length <= 10_000 &&
+    typeof message.timestamp === "number" && Number.isFinite(message.timestamp) &&
+    typeof message.color === "string" && message.color.length <= 32
+  );
+}
+
+function validOwnerControl(value: unknown): value is OwnerControlMessage {
+  if (!value || typeof value !== "object") return false;
+  const control = value as OwnerControlMessage;
+  return (
+    control.type === "workspace-control" &&
+    Array.isArray(control.selectedScopes) &&
+    control.selectedScopes.length <= 100 &&
+    control.selectedScopes.every((scope) => typeof scope === "string" && scope.length > 0 && scope.length <= 255) &&
+    typeof control.syncing === "boolean" &&
+    typeof control.workspaceName === "string" && control.workspaceName.length <= 255 &&
+    Number.isSafeInteger(control.revision) && control.revision > 0
+  );
+}
 
 function signalUrl() {
   return `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/signal`;
@@ -98,6 +133,8 @@ class YUpdateSender {
 class OwnerRoom {
   private peers = new Map<string, { pc: RTCPeerConnection; channel?: RTCDataChannel; updateSender?: YUpdateSender }>();
   private ws?: WebSocket;
+  private stopped = false;
+  private reconnectTimer?: ReturnType<typeof setTimeout>;
 
   constructor(
     private doc: Y.Doc,
@@ -107,28 +144,38 @@ class OwnerRoom {
     private permission: SessionPermission,
     private onPeerCountChange: () => void,
     private awareness: Awareness,
+    private getControl: () => OwnerControlMessage,
+    private getChatHistory: () => ChatMessage[],
+    private onChat: (message: ChatMessage, room: OwnerRoom, peerId: string) => void,
+    private onStatus: (state: SessionState) => void,
   ) {}
 
   connect() {
+    this.stopped = false;
     this.connectSignal();
   }
 
   private connectSignal() {
+    if (this.stopped) return;
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     console.log("Owner connecting to signaling server:", signalUrl());
     this.ws = new WebSocket(signalUrl());
 
     this.ws.onopen = () => {
       console.log("Owner connected to signaling server");
+      this.onStatus("waiting");
       this.ws?.send(JSON.stringify({ type: "join", roomHash: this.roomHash, peerId: this.peerId }));
     };
 
     this.ws.onclose = () => {
+      if (this.stopped) return;
       console.log("Owner signaling server disconnected. Reconnecting in 3s...");
-      setTimeout(() => this.connectSignal(), 3000);
+      this.onStatus("reconnecting");
+      this.reconnectTimer = setTimeout(() => this.connectSignal(), RECONNECT_DELAY_MS);
     };
 
     this.ws.onerror = (err) => {
-      console.error("Owner signaling error:", err);
+      if (!this.stopped) console.warn("Owner signaling error; reconnect will be attempted.", err);
     };
 
     this.ws.onmessage = async (event) => {
@@ -151,12 +198,18 @@ class OwnerRoom {
   }
 
   stop() {
+    if (this.stopped) return;
+    this.stopped = true;
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = undefined;
     this.ws?.close();
+    this.ws = undefined;
     for (const peer of this.peers.values()) {
       peer.updateSender?.clear();
       peer.pc.close();
     }
     this.peers.clear();
+    this.onPeerCountChange();
   }
 
   peerCount() {
@@ -172,6 +225,14 @@ class OwnerRoom {
 
   async broadcastAwareness(update: Uint8Array, excludePeerId?: string) {
     await this.broadcast({ type: "awareness", update: bytesToBase64Url(update) }, excludePeerId);
+  }
+
+  async broadcastChat(message: ChatMessage, excludePeerId?: string) {
+    await this.broadcast({ type: "chat", message }, excludePeerId);
+  }
+
+  async broadcastControl(message: OwnerControlMessage) {
+    await this.broadcast({ type: "control", message });
   }
 
   private async broadcast(payload: EncryptedPayload, excludePeerId?: string) {
@@ -218,6 +279,7 @@ class OwnerRoom {
       });
     }
     channel.onopen = async () => {
+      this.onStatus("connected");
       this.onPeerCountChange();
     };
     channel.onclose = () => {
@@ -245,8 +307,12 @@ class OwnerRoom {
         if (awarenessUpdate.byteLength > 0) {
           await sendEncrypted(channel, this.key, { type: "awareness", update: bytesToBase64Url(awarenessUpdate) });
         }
+        await sendEncrypted(channel, this.key, { type: "control", message: this.getControl() });
+        for (const message of this.getChatHistory().slice(-200)) {
+          await sendEncrypted(channel, this.key, { type: "chat", message });
+        }
       }
-      if (payload.type === "y-update" && this.permission === "edit") {
+      if (payload.type === "y-update" && canEditSession(this.permission)) {
         const update = base64UrlToBytes(payload.update);
         Y.applyUpdate(this.doc, update, { type: "owner-room", room: this, peerId });
       }
@@ -254,6 +320,11 @@ class OwnerRoom {
         const update = base64UrlToBytes(payload.update);
         applyAwarenessUpdate(this.awareness, update, { type: "owner-room", room: this, peerId });
       }
+      if (payload.type === "chat" && validChatMessage(payload.message)) {
+        this.onChat(payload.message, this, peerId);
+      }
+      // Control messages are deliberately owner-to-peer only. A crafted peer
+      // message is ignored, regardless of edit permission.
     };
   }
 
@@ -293,6 +364,9 @@ function isOwnerRoomOrigin(origin: unknown): origin is OwnerRoomOrigin {
 
 export class OwnerCollaboration {
   private rooms: OwnerRoom[] = [];
+  private stopped = false;
+  private control: OwnerControlMessage;
+  private chatHistory: ChatMessage[];
   private updateHandler = (update: Uint8Array, origin: unknown) => {
     if (origin !== this) {
       void this.broadcastUpdate(update, isOwnerRoomOrigin(origin) ? origin : undefined);
@@ -313,24 +387,66 @@ export class OwnerCollaboration {
     rooms: OwnerRoom[],
     private onPeerCountChange: () => void,
     private awareness: Awareness,
+    control: OwnerControlMessage,
+    chatHistory: ChatMessage[],
+    private onChat: (message: ChatMessage) => void,
+    private onStatus: (state: SessionState) => void,
   ) {
     this.rooms = rooms;
+    this.control = control;
+    this.chatHistory = chatHistory.slice(-200);
     this.doc.on("update", this.updateHandler);
     this.awareness.on("update", this.awarenessHandler);
   }
 
   connect() {
+    this.stopped = false;
+    this.onStatus("starting");
     this.rooms.forEach((room) => room.connect());
   }
 
   stop() {
+    if (this.stopped) return;
+    this.stopped = true;
     this.doc.off("update", this.updateHandler);
     this.awareness.off("update", this.awarenessHandler);
     this.rooms.forEach((room) => room.stop());
+    this.onStatus("stopped");
   }
 
   peerCount() {
     return this.rooms.reduce((count, room) => count + room.peerCount(), 0);
+  }
+
+  currentControl() {
+    return this.control;
+  }
+
+  currentChatHistory() {
+    return this.chatHistory;
+  }
+
+  updateControl(update: Omit<OwnerControlMessage, "type" | "revision">) {
+    this.control = {
+      type: "workspace-control",
+      ...update,
+      revision: this.control.revision + 1,
+    };
+    void Promise.all(this.rooms.map((room) => room.broadcastControl(this.control)));
+  }
+
+  sendChat(message: ChatMessage) {
+    if (!validChatMessage(message)) return;
+    if (!this.chatHistory.some((candidate) => candidate.id === message.id)) this.chatHistory = [...this.chatHistory, message].slice(-200);
+    this.onChat(message);
+    void Promise.all(this.rooms.map((room) => room.broadcastChat(message)));
+  }
+
+  receiveChat(message: ChatMessage, originRoom: OwnerRoom, peerId: string) {
+    if (!validChatMessage(message)) return;
+    if (!this.chatHistory.some((candidate) => candidate.id === message.id)) this.chatHistory = [...this.chatHistory, message].slice(-200);
+    this.onChat(message);
+    void Promise.all(this.rooms.map((room) => room.broadcastChat(message, room === originRoom ? peerId : undefined)));
   }
 
   private async broadcastUpdate(update: Uint8Array, origin?: OwnerRoomOrigin) {
@@ -342,14 +458,32 @@ export class OwnerCollaboration {
   }
 }
 
-export async function startOwnerCollaboration(doc: Y.Doc, awareness: Awareness, onPeerCountChange: () => void): Promise<OwnerCollaboration> {
+export interface OwnerCollaborationOptions {
+  control: Omit<OwnerControlMessage, "type" | "revision">;
+  onChat?: (message: ChatMessage) => void;
+  onStatus?: (state: SessionState) => void;
+  initialChatMessages?: ChatMessage[];
+}
+
+export async function startOwnerCollaboration(
+  doc: Y.Doc,
+  awareness: Awareness,
+  onPeerCountChange: () => void,
+  options: OwnerCollaborationOptions,
+): Promise<OwnerCollaboration> {
   const documentSecret = randomSecret();
   const editSecret = randomSecret();
   const viewSecret = randomSecret();
   const key = await deriveDocumentKey(documentSecret);
   const ownerPeerId = randomSecret(12);
-  const editRoom = new OwnerRoom(doc, key, await deriveRoomHash(editSecret), `${ownerPeerId}-e`, "edit", onPeerCountChange, awareness);
-  const viewRoom = new OwnerRoom(doc, key, await deriveRoomHash(viewSecret), `${ownerPeerId}-v`, "view", onPeerCountChange, awareness);
+  const initialControl: OwnerControlMessage = { type: "workspace-control", ...options.control, revision: 1 };
+  let session: OwnerCollaboration;
+  const getControl = () => session?.currentControl() || initialControl;
+  const getChatHistory = () => session?.currentChatHistory() || options.initialChatMessages || [];
+  const onRoomChat = (message: ChatMessage, room: OwnerRoom, peerId: string) => session?.receiveChat(message, room, peerId);
+  const onStatus = options.onStatus || (() => undefined);
+  const editRoom = new OwnerRoom(doc, key, await deriveRoomHash(editSecret), `${ownerPeerId}-e`, "edit", onPeerCountChange, awareness, getControl, getChatHistory, onRoomChat, onStatus);
+  const viewRoom = new OwnerRoom(doc, key, await deriveRoomHash(viewSecret), `${ownerPeerId}-v`, "view", onPeerCountChange, awareness, getControl, getChatHistory, onRoomChat, onStatus);
 
   const editLink = `${window.location.origin}/join#${encodeInvite({
     v: 1,
@@ -364,7 +498,18 @@ export async function startOwnerCollaboration(doc: Y.Doc, awareness: Awareness, 
     roomSecret: viewSecret,
   } satisfies InvitePayload)}`;
 
-  const session = new OwnerCollaboration(doc, editLink, viewLink, [editRoom, viewRoom], onPeerCountChange, awareness);
+  session = new OwnerCollaboration(
+    doc,
+    editLink,
+    viewLink,
+    [editRoom, viewRoom],
+    onPeerCountChange,
+    awareness,
+    initialControl,
+    options.initialChatMessages || [],
+    options.onChat || (() => undefined),
+    onStatus,
+  );
   session.connect();
   return session;
 }
@@ -374,8 +519,10 @@ export class JoinCollaboration {
   private channel?: RTCDataChannel;
   private updateSender?: YUpdateSender;
   private ws?: WebSocket;
+  private stopped = false;
+  private reconnectTimer?: ReturnType<typeof setTimeout>;
   private updateHandler = (update: Uint8Array, origin: unknown) => {
-    if (origin !== this && this.permission === "edit") {
+    if (origin !== this && canEditSession(this.permission)) {
       this.updateSender?.queue(update);
     }
   };
@@ -394,16 +541,21 @@ export class JoinCollaboration {
     public permission: SessionPermission,
     private onStatus: (status: string) => void,
     private awareness: Awareness,
+    private onChat: (message: ChatMessage) => void,
+    private onControl: (message: OwnerControlMessage) => void,
   ) {
     this.doc.on("update", this.updateHandler);
     this.awareness.on("update", this.awarenessHandler);
   }
 
   connect() {
+    this.stopped = false;
     this.connectSignal();
   }
 
   private connectSignal() {
+    if (this.stopped) return;
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     console.log("Joiner connecting to signaling server:", signalUrl());
     const ws = new WebSocket(signalUrl());
     const peerId = randomSecret(12);
@@ -420,22 +572,36 @@ export class JoinCollaboration {
       }
     };
     ws.onclose = () => {
+      if (this.stopped) return;
       console.log("Joiner signaling server disconnected. Reconnecting in 3s...");
       this.onStatus("Disconnected - reconnecting...");
-      setTimeout(() => this.connectSignal(), 3000);
+      this.reconnectTimer = setTimeout(() => this.connectSignal(), RECONNECT_DELAY_MS);
     };
     ws.onerror = (err) => {
-      console.error("Joiner signaling error:", err);
+      if (this.stopped) return;
+      console.warn("Joiner signaling error; reconnect will be attempted.", err);
       this.onStatus("Signaling Error");
     };
   }
 
   stop() {
+    if (this.stopped) return;
+    this.stopped = true;
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = undefined;
     this.doc.off("update", this.updateHandler);
     this.awareness.off("update", this.awarenessHandler);
     this.updateSender?.clear();
     this.ws?.close();
+    this.ws = undefined;
     this.pc?.close();
+    this.pc = undefined;
+    this.channel = undefined;
+    this.onStatus("Session stopped");
+  }
+
+  sendChat(message: ChatMessage) {
+    if (validChatMessage(message)) void this.send({ type: "chat", message });
   }
 
   private async send(payload: EncryptedPayload) {
@@ -459,6 +625,7 @@ export class JoinCollaboration {
     channel.onclose = () => {
       this.updateSender?.clear();
       this.updateSender = undefined;
+      if (!this.stopped) this.onStatus("Owner session ended");
     };
     channel.onmessage = async (event) => {
       const payload = await decryptJson<EncryptedPayload>(this.key, event.data);
@@ -468,6 +635,12 @@ export class JoinCollaboration {
       if (payload.type === "awareness") {
         applyAwarenessUpdate(this.awareness, base64UrlToBytes(payload.update), this);
       }
+      if (payload.type === "chat" && validChatMessage(payload.message)) {
+        this.onChat(payload.message);
+      }
+      if (payload.type === "control" && validOwnerControl(payload.message)) {
+        this.onControl(payload.message);
+      }
     };
   }
 
@@ -475,6 +648,11 @@ export class JoinCollaboration {
     if (!this.ws) return;
     if (!this.pc) {
       this.pc = newPeerConnection();
+      this.pc.onconnectionstatechange = () => {
+        if (!this.stopped && this.pc && ["failed", "disconnected", "closed"].includes(this.pc.connectionState)) {
+          this.onStatus("Connection lost");
+        }
+      };
       this.pc.ondatachannel = (event) => this.setupChannel(event.channel);
       this.pc.onicecandidate = (event) => {
         if (event.candidate && this.ws) {
@@ -495,7 +673,18 @@ export class JoinCollaboration {
   }
 }
 
-export async function joinCollaboration(doc: Y.Doc, awareness: Awareness, invite: InvitePayload, onStatus: (status: string) => void) {
+export interface JoinCollaborationOptions {
+  onChat?: (message: ChatMessage) => void;
+  onControl?: (message: OwnerControlMessage) => void;
+}
+
+export async function joinCollaboration(
+  doc: Y.Doc,
+  awareness: Awareness,
+  invite: InvitePayload,
+  onStatus: (status: string) => void,
+  options: JoinCollaborationOptions = {},
+) {
   const session = new JoinCollaboration(
     doc,
     await deriveDocumentKey(invite.documentSecret),
@@ -503,6 +692,8 @@ export async function joinCollaboration(doc: Y.Doc, awareness: Awareness, invite
     invite.role,
     onStatus,
     awareness,
+    options.onChat || (() => undefined),
+    options.onControl || (() => undefined),
   );
   session.connect();
   return session;

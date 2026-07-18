@@ -1,95 +1,72 @@
 # Marktwin Architecture
 
-Marktwin is a React and Node application built around a strict privacy boundary:
-private repository content and GitHub credentials stay in the browser, not on
-the Marktwin server.
+Marktwin is a React and Node application built around a strict boundary:
+private repository content and GitHub credentials stay in browsers, not on the
+Marktwin server.
 
 ## System Components
 
-- **Client**: React, TypeScript, Vite, Tailwind, shadcn-style UI components,
-  Markdown/WYSIWYG editors, Yjs state, and browser-side GitHub API calls.
-- **Server**: Express, static asset serving, ephemeral WebRTC signaling, and
-  on-demand PDF export.
-- **Storage**: GitHub repositories controlled by the user. Marktwin does not use
-  a server-side database for private notes or accounts.
-- **Collaboration**: Yjs CRDT updates exchanged over encrypted WebRTC data
-  channels after peer discovery.
+- **Client:** React, TypeScript, Yjs, CodeMirror, browser-to-GitHub API calls,
+  encrypted WebRTC collaboration, staged Changes review, and sanitized local
+  print export.
+- **Server:** Express static serving and ephemeral WebRTC signaling.
+- **Storage:** GitHub for published Markdown; browser local storage for saved
+  repository metadata and selected scopes; session storage for credentials.
+- **Live state:** one Yjs working tree containing UUID file records and `Y.Text`
+  content. Unsynced work is memory/P2P-only.
 
 ## Privacy Boundary
 
-Allowed on the server:
+The server may receive static requests and transient signaling values (room
+hash, temporary peer ID, offer, answer, and ICE candidates). It must never
+receive GitHub credentials, repository content, plaintext document updates,
+chat, activity, invite secrets, or document keys. `/api/pdf/*` is intentionally
+absent; print export is sanitized in the browser.
 
-- static asset requests
-- API request metadata such as method, path, status, and duration
-- transient WebRTC signaling data: room hash, peer id, offers, answers, ICE
-  candidates, and cleanup timestamps
-- Markdown submitted to PDF export for that single request only
+## Workspace Loading
 
-Never allowed on the server as stored or reusable private data:
+1. The user connects `owner/repo` through configured OAuth or an advanced PAT.
+2. The browser validates repository and branch directly with GitHub.
+3. It discovers immediate repository children only. `.agents` is the sole
+   default; `Main path` means root-level Markdown only.
+4. A selected top-level folder includes descendant Markdown. Non-Markdown
+   assets are neither loaded nor managed.
+5. File requests use bounded concurrency, cancellation, progress reporting,
+   and SHA caching.
 
-- GitHub personal access tokens or OAuth access tokens
-- repository file contents
-- plaintext collaboration updates
-- plaintext chat messages
-- invite secrets or document encryption keys
-- reusable share tokens
+## Collaboration Protocol
 
-The canonical privacy model lives in [PRIVACY.md](./PRIVACY.md).
+The owner creates separate fresh edit and view invite fragments. After `/signal`
+peer discovery, all application payloads are encrypted locally and separated by
+purpose:
 
-## Client Data Flow
+- Yjs document updates: accepted from edit rooms only.
+- Chat: accepted from edit and view rooms.
+- Awareness: presence, display name, role, cursor, and viewed file.
+- Owner control: selected scopes, workspace name, and Sync lock; peers cannot
+  send or alter owner control.
 
-1. A user creates a cabinet for a GitHub repository.
-2. The browser stores cabinet metadata in local storage.
-3. The user provides a GitHub token for the current browser session, or uses
-   browser-side GitHub OAuth PKCE when configured.
-4. The browser calls the GitHub REST API directly to list, load, and commit
-   files.
-5. Markdown files are edited locally, synchronized through Yjs when
-   collaborating, and committed back to GitHub by the browser.
+Closing or rotating a session cancels reconnect timers and closes live rooms.
+Display names and activity attribution are review context, never authorization.
+`/manual-pair` is an isolated WebRTC transport lab, not a workspace transport.
 
-## Collaboration Flow
+## Changes and GitHub Publication
 
-1. The owner starts a private collaboration session.
-2. The browser creates fresh invite material and keys.
-3. Invite secrets are carried in URL fragments so they are not sent in HTTP
-   requests.
-4. Peers use `/signal` only to exchange WebRTC connection setup data.
-5. Document updates, awareness, and chat travel through encrypted WebRTC/Yjs.
-6. Collaborators can edit only through an edit invite. The owner remains the
-   party that commits to GitHub.
+All content and structural operations are staged. The owner keeps a browser-local
+GitHub baseline for diffs and recovery. Changes supports per-item Undo,
+workspace-wide Discard, attribution, a commit message, and explicit final Sync.
 
-Manual pairing at `/manual-pair` avoids the signaling server by letting peers
-copy WebRTC offers and answers themselves.
+Before Sync, every current and original path is normalized and checked against
+owner-selected scopes. Sync then snapshots the branch, creates one Git tree and
+commit, and fast-forwards the reference. If GitHub advanced, Marktwin creates a
+`branch-marktwin-YYYYMMDD-HHmmss` branch at the prepared commit and switches the
+saved workspace to it. Failures keep staged state intact.
 
-## Server Responsibilities
+## Deployment and Release Gates
 
-- Serve the built client in production.
-- Run Vite middleware in development.
-- Host `/signal` for in-memory WebRTC peer discovery.
-- Generate PDFs from request-scoped Markdown payloads.
-- Avoid logging request bodies or private collaboration payloads.
+Marktwin needs a long-running Node process for `/signal`. Configure production
+STUN/TURN through `.env.example`; `VITE_GITHUB_OAUTH_CLIENT_ID` optionally enables
+OAuth.
 
-## Deployment Shape
-
-Marktwin needs a long-running Node process because WebSocket signaling requires
-persistent connections. Same-origin deployment is the default: the Express
-server serves both the API and client bundle.
-
-Optional environment variables:
-
-- `PORT`: server port, default `5001`.
-- `PUBLIC_BASE_URL`: absolute deployment URL for server-generated asset links.
-- `VITE_API_BASE_URL`: API origin for split frontend/backend deployments.
-- `VITE_GITHUB_OAUTH_CLIENT_ID`: enables browser-side GitHub OAuth PKCE.
-- WebRTC ICE variables from `.env.example`: configure STUN/TURN servers for
-  production collaboration reliability.
-
-## Release Gates
-
-Before publishing or deploying:
-
-- `npm run check`
-- `npm run build`
-- `npm run verify`
-- confirm no GitHub tokens, invite secrets, Markdown content, or plaintext
-  collaboration data are logged or persisted by the server
+Run `npm run verify` before release. It includes unit tests, the multi-browser
+Puppeteer smoke flow, TypeScript, and the production build.

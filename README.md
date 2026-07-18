@@ -1,25 +1,38 @@
 # Marktwin
 
-Private, collaborative Markdown notes backed by your GitHub repositories.
+**Craft, together.**
 
-Marktwin is a self-hostable web app for opening a GitHub repository as a note
-cabinet, editing Markdown in the browser, collaborating over encrypted WebRTC,
-and committing changes back to GitHub without a server-side database or account
-system.
+Private, collaborative agent workspaces backed by Markdown in your GitHub repositories.
+
+Marktwin is a self-hostable space for defining agent missions, rules, skills,
+tools, boundaries, examples, and review criteria together. It opens selected
+Markdown scopes from GitHub, supports encrypted live collaboration and
+discussion, and gives the owner an explicit Changes review before one atomic
+GitHub commit—without a server-side database or account system.
 
 Hosted version: [marktwin.com](https://marktwin.com)
 
 ## Why Marktwin Exists
 
-- **GitHub-backed notes**: your Markdown files stay in repositories you control.
+- **GitHub-backed agent workspaces**: your Markdown files stay in repositories you control.
+- **Agent-workspace focus**: Marktwin opens `.agents` by default and lets you opt
+  into the repository root or other principal folders when they are useful.
 - **No Marktwin accounts**: use a GitHub personal access token or browser-side
   GitHub OAuth PKCE.
 - **Private by design**: document content and GitHub credentials are not stored
   by the Marktwin server.
-- **Peer-to-peer collaboration**: live updates flow between browsers through
-  encrypted WebRTC data channels.
+- **Scoped P2P collaboration**: share the selected workspace through separate
+  edit and view-only links. View peers can discuss but cannot change documents;
+  only the owner can review and publish to GitHub.
+- **Reviewable work**: additions, edits, moves, renames, deletions, and captured
+  decisions remain staged with Undo/Discard controls until owner review.
+- **Conflict-safe GitHub sync**: Marktwin checks the current branch head before
+  publishing one atomic workspace commit, and saves work to a new branch instead
+  of silently overwriting a conflicting remote change.
+- **Browser-private export**: Print / Save as PDF creates a sanitized print view
+  locally; private Markdown never goes to a Marktwin PDF endpoint.
 - **Self-hostable**: the backend is a small Node/Express server for static
-  serving, ephemeral WebRTC signaling, and on-demand PDF export.
+  serving and ephemeral WebRTC signaling only.
 
 Read the full privacy boundary in [docs/PRIVACY.md](./docs/PRIVACY.md) and the
 system architecture in [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md).
@@ -37,7 +50,8 @@ See [docs/ROADMAP.md](./docs/ROADMAP.md) for planned work.
 
 - Node.js >=20.19.0
 - npm >=10
-- A GitHub repository containing Markdown files
+- A GitHub repository containing Markdown files, or a token permitted to create
+  a private repository
 
 No database, queue, object store, or account provider is required.
 
@@ -48,9 +62,13 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:5001`, create a cabinet for a repository in
-`owner/repo` format, and paste a GitHub token with repository contents read/write
-access.
+Open `http://localhost:5001`, connect a repository in `owner/repo` format, and
+use configured GitHub OAuth or the advanced personal-access-token path. The
+credential needs repository Contents read/write access. Marktwin initially
+loads only `.agents`; use the folder selector to add
+`Main path` (root-level Markdown) or another top-level folder. Edits, file
+operations, captured decisions, and Markdown imports remain staged until the
+owner reviews Changes and confirms Sync.
 
 To create the recommended fine-grained GitHub token, see
 [docs/TUTORIAL.md](./docs/TUTORIAL.md).
@@ -60,17 +78,16 @@ To create the recommended fine-grained GitHub token, see
 Marktwin runs without a `.env` file. Optional settings are documented in
 [.env.example](./.env.example).
 
-Common production settings:
+Common optional production setting:
 
 ```bash
 PORT=5001
-PUBLIC_BASE_URL=https://notes.example.com
 VITE_GITHUB_OAUTH_CLIENT_ID=your_github_oauth_client_id
 ```
 
-Use `PUBLIC_BASE_URL` when the server needs to generate absolute URLs, such as
-PDF watermark assets. `VITE_API_BASE_URL` is only needed for uncommon split
-frontend/backend deployments; leave it empty for same-origin hosting.
+Without an OAuth client ID, Marktwin truthfully presents the PAT flow as the
+available connection method. Fine-grained tokens need Contents read/write;
+creating a missing private repository also needs Administration write.
 
 ## Production Build
 
@@ -90,14 +107,15 @@ the WebRTC environment variables in [.env.example](./.env.example).
 ## Development
 
 ```bash
+npm test
 npm run check
 npm run build
 npm run verify
 ```
 
-`npm run verify` is the public release gate and currently runs TypeScript plus a
-production build. There is no linter configured yet; match the surrounding code
-style.
+`npm run verify` is the public release gate and runs the Node test suite,
+TypeScript, and a production build. There is no linter configured yet; match the
+surrounding code style.
 
 ## Security
 

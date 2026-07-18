@@ -1,859 +1,883 @@
-import { useState, useEffect, useRef, useCallback } from "react";
-import { useRoute, useLocation } from "wouter";
-import { useQuery, useMutation } from "@tanstack/react-query";
-import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { AlertCircle, Lock, Github, Users, Settings, Plus, FileText, Share2, Upload, Copy, Maximize2, Minimize2, MessageSquare, FileCode, Type, ChevronRight, ChevronLeft } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useRoute } from "wouter";
+import { useQuery } from "@tanstack/react-query";
+import {
+  AlertCircle,
+  ChevronDown,
+  ChevronLeft,
+  Copy,
+  FileText,
+  FolderOpen,
+  Github,
+  ListChecks,
+  Loader2,
+  MessageSquare,
+  Plus,
+  RotateCw,
+  Settings,
+  Share2,
+  Undo2,
+  Upload,
+} from "lucide-react";
+import * as Y from "yjs";
+import { Awareness } from "y-protocols/awareness";
+
+import type { CapturedDecision, ChatMessage, Note, SessionState, Vault, WorkspaceActivity, WorkspaceChange } from "@shared/schema";
 import FileExplorer from "@/components/file-explorer";
 import SimpleCollaborativeEditor from "@/components/simple-collaborative-editor";
 import CollaborationIndicator from "@/components/collaboration-indicator";
 import CabinetSettingsDialog from "@/components/cabinet-settings-dialog";
-import * as Y from "yjs";
-import { Awareness } from "y-protocols/awareness";
-import { decodeInvite } from "@/lib/private-crypto";
-import { startOwnerCollaboration, OwnerCollaboration, InvitePayload, JoinCollaboration, joinCollaboration } from "@/lib/private-collab";
-import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import ChatPanel, { type ChatMessage } from "@/components/chat-panel";
+import ChatPanel from "@/components/chat-panel";
+import { ConfirmDialog } from "@/components/confirm-dialog";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import type { Vault, Note } from "@shared/schema";
-import { listGitHubFiles, loadMarkdownFile, commitMarkdownFile, createBranch } from "@/lib/browser-github";
+import { queryClient } from "@/lib/queryClient";
+import { decodeInvite } from "@/lib/private-crypto";
+import {
+  InvitePayload,
+  JoinCollaboration,
+  OwnerCollaboration,
+  canEditSession,
+  joinCollaboration,
+  startOwnerCollaboration,
+} from "@/lib/private-collab";
+import {
+  GitHubApiError,
+  GitHubRootScope,
+  GitHubRootSnapshot,
+  commitAtomicChanges,
+  createPrivateRepository,
+  defaultRootScopes,
+  getAuthenticatedUser,
+  getBranch,
+  getRepository,
+  getRootSnapshot,
+  loadScopeSnapshot,
+  parseRepo,
+} from "@/lib/browser-github";
+import {
+  addMarkdownNote,
+  assertWorkspaceWithinScopes,
+  collectAtomicChanges,
+  createFolder,
+  deleteFolder,
+  deleteNote,
+  describeWorkspaceChanges,
+  discardWorkspaceChange,
+  discardWorkspaceChanges,
+  folderMarkdownCount,
+  fullNotePath,
+  getFilesMap,
+  getFoldersMap,
+  hasUnsyncedChanges,
+  hydrateSelectedScopes,
+  joinFolderPath,
+  markNoteModified,
+  mergeScopeContent,
+  moveFolder,
+  moveNote,
+  normalizeDirectoryPath,
+  pathBelongsToScope,
+  readCabinetNotes,
+  removeCleanScope,
+  renameNote,
+  scopeForPath,
+  visibleFolderPaths,
+  type ScopeContent,
+} from "@/lib/cabinet-files";
 import { getSavedRepos, updateSavedRepo, type SavedRepoLocal } from "@/lib/saved-repos";
+
+type PendingDelete =
+  | { kind: "file"; id: string; label: string; count: 1 }
+  | { kind: "folder"; path: string; label: string; count: number };
+
+type PendingMove = {
+  sourcePath: string;
+  targetPath: string;
+  count: number;
+};
+
+function repositoryErrorMessage(error: unknown) {
+  if (error instanceof GitHubApiError) {
+    if (error.status === 401) return "GitHub rejected this token. Check the token and try again.";
+    if (error.status === 403) return "This token does not have permission to read and write the repository.";
+    return error.responseMessage;
+  }
+  return error instanceof Error ? error.message : "GitHub request failed.";
+}
 
 export default function VaultPage() {
   const [, params] = useRoute("/cabinet/:slug");
   const [isJoinRoute] = useRoute("/join");
   const [, setLocation] = useLocation();
   const slug = params?.slug || "";
+  const { toast } = useToast();
+
+  const vaultYdoc = useRef(new Y.Doc()).current;
+  const vaultAwareness = useRef(new Awareness(vaultYdoc)).current;
+  const joinSessionRef = useRef<JoinCollaboration | null>(null);
+  const ownerSessionRef = useRef<OwnerCollaboration | null>(null);
+  const [collabSession, setCollabSession] = useState<OwnerCollaboration | null>(null);
+
+  const { data: savedRepos = [], isLoading: reposLoading } = useQuery<SavedRepoLocal[]>({
+    queryKey: ["saved-repos"],
+    queryFn: () => getSavedRepos(),
+    enabled: !isJoinRoute,
+  });
+  const privateRepo = savedRepos.find((repo) => (
+    String(repo.id) === slug ||
+    repo.repoFullName.split("/")[1] === slug ||
+    repo.repoFullName === slug
+  ));
+  const legacyTokenKey = privateRepo ? `gh-token-${privateRepo.repoFullName.split("/")[1]}` : "";
+  const tokenKey = privateRepo ? `gh-token-${privateRepo.id}` : "";
+  const githubToken = privateRepo
+    ? sessionStorage.getItem(tokenKey) || sessionStorage.getItem(legacyTokenKey)
+    : null;
+
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [emptyFolders, setEmptyFolders] = useState<string[]>([]);
+  const [selectedScopes, setSelectedScopes] = useState<string[]>([]);
+  const [rootSnapshot, setRootSnapshot] = useState<GitHubRootSnapshot | null>(null);
+  const [workingBranch, setWorkingBranch] = useState("");
+  const [baseCommitSha, setBaseCommitSha] = useState("");
+  const [baseTreeSha, setBaseTreeSha] = useState("");
   const [authenticated, setAuthenticated] = useState(false);
-  const [activeNoteId, setActiveNoteId] = useState<number | null>(null);
+  const [loadingCabinet, setLoadingCabinet] = useState(false);
+  const [loadProgress, setLoadProgress] = useState<{ scope: string; completed: number; total: number } | null>(null);
+  const loadAbortRef = useRef<AbortController | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const syncingRef = useRef(false);
+  const [dirty, setDirty] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const [missingRepository, setMissingRepository] = useState(false);
+  const [creationLogin, setCreationLogin] = useState("");
+  const [creatingRepository, setCreatingRepository] = useState(false);
+  const [branchIssue, setBranchIssue] = useState<{ requested: string; fallback: string } | null>(null);
+
+  const [activeNoteId, setActiveNoteId] = useState<string | null>(null);
+  const [activeTabId, setActiveTabId] = useState<string | null>(null);
+  const [openTabs, setOpenTabs] = useState<string[]>([]);
+  const [splitViewNoteId, setSplitViewNoteId] = useState<string | null>(null);
   const [editorMode, setEditorMode] = useState<"raw" | "preview">("raw");
-  const [sidebarWidth, setSidebarWidth] = useState(320);
-  const [showVaultUrl, setShowVaultUrl] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobilePanel, setMobilePanel] = useState<"files" | "document">("files");
   const [showSettings, setShowSettings] = useState(false);
   const [showCollabDialog, setShowCollabDialog] = useState(false);
-  const [collabSession, setCollabSession] = useState<OwnerCollaboration | null>(null);
-  const [syncedPeerCount, setSyncedPeerCount] = useState(1);
-  const [sharedName, setSharedName] = useState("Shared Cabinet");
-  const [invite, setInvite] = useState<InvitePayload | null>(null);
-  const [joinStatus, setJoinStatus] = useState("Preparing private session");
-  const [joinError, setJoinError] = useState("");
-  const joinSessionRef = useRef<JoinCollaboration | null>(null);
-  const [joinNotes, setJoinNotes] = useState<Note[]>([]);
+  const [showChat, setShowChat] = useState(false);
+  const [chatWidth, setChatWidth] = useState(384);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [workspaceActivities, setWorkspaceActivities] = useState<WorkspaceActivity[]>([]);
+  const [hasUnread, setHasUnread] = useState(false);
+  const showChatRef = useRef(false);
+  const [sessionState, setSessionState] = useState<SessionState>("stopped");
+  const [peerCount, setPeerCount] = useState(0);
+  const [showChanges, setShowChanges] = useState(false);
+  const [confirmDiscardAll, setConfirmDiscardAll] = useState(false);
+  const [commitMessage, setCommitMessage] = useState("Update agent workspace via Marktwin");
+  const [decisionMessage, setDecisionMessage] = useState<ChatMessage | null>(null);
+  const [decisionText, setDecisionText] = useState("");
+  const [decisionTargetId, setDecisionTargetId] = useState("");
+  const baselineRef = useRef<ScopeContent[]>([]);
 
-  // Yjs document for the full cabinet sync
-  const vaultYdoc = useRef(new Y.Doc()).current;
-  const [focusMode, setFocusMode] = useState(false);
-  const [isDragOver, setIsDragOver] = useState(false);
-  const { toast } = useToast();
-  const fileExplorerRef = useRef(null);
   const [creatingFile, setCreatingFile] = useState(false);
   const [newFileName, setNewFileName] = useState("");
   const [newFilePath, setNewFilePath] = useState("/");
-  const [openTabs, setOpenTabs] = useState<number[]>([]);
-  const [activeTabId, setActiveTabId] = useState<number | null>(null);
-  const [splitViewNoteId, setSplitViewNoteId] = useState<number | null>(null);
-  const [showChat, setShowChat] = useState(false);
-  const [hasUnread, setHasUnread] = useState(false);
-  const [chatWidth, setChatWidth] = useState(384); // Default width of 384px (w-96)
-  const [isMovingFolder, setIsMovingFolder] = useState(false);
-  const [isCreatingFolder, setIsCreatingFolder] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [lastSidebarWidth, setLastSidebarWidth] = useState(320);
-  const activeNoteIdRef = useRef(activeNoteId);
-  const openTabsLengthRef = useRef(openTabs.length);
-  const showChatRef = useRef(showChat);
+  const [creationPath, setCreationPath] = useState(".agents/");
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
+  const [pendingMove, setPendingMove] = useState<PendingMove | null>(null);
 
-  const vaultAwareness = useRef(new Awareness(vaultYdoc)).current;
-  const chatClientId = String(vaultAwareness.clientID);
+  const [invite, setInvite] = useState<InvitePayload | null>(null);
+  const [joinStatus, setJoinStatus] = useState("Preparing private session");
+  const [joinError, setJoinError] = useState("");
+  const [sharedName, setSharedName] = useState("Shared workspace");
+  const [showShareProgress, setShowShareProgress] = useState(false);
+
   const generatedUsernameRef = useRef(`User${Math.random().toString(36).substring(2, 6)}`);
-  const userRenamedSelfRef = useRef(false);
-  const [myUsername, setMyUsername] = useState(() => generatedUsernameRef.current);
-  const [myColor, setMyColor] = useState(() => `#${Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0')}`);
+  const [myUsername, setMyUsername] = useState(generatedUsernameRef.current);
+  const [myColor] = useState(() => `#${Math.floor(Math.random() * 16777215).toString(16).padStart(6, "0")}`);
+  const chatClientId = String(vaultAwareness.clientID);
 
-  const handleUsernameChange = useCallback((name: string) => {
-    userRenamedSelfRef.current = true;
-    setMyUsername(name);
-  }, []);
+  const appendChatMessage = useCallback((message: ChatMessage) => {
+    setChatMessages((current) => {
+      if (current.some((candidate) => candidate.id === message.id)) return current;
+      return [...current, message].slice(-200);
+    });
+    if (message.sessionId !== chatClientId && !showChatRef.current) setHasUnread(true);
+  }, [chatClientId]);
+
+  const recordActivity = useCallback((operation: string, fileId?: string, path?: string) => {
+    const activity: WorkspaceActivity = {
+      id: crypto.randomUUID(),
+      actor: {
+        sessionId: chatClientId,
+        displayName: myUsername,
+        color: myColor,
+        role: isJoinRoute ? invite?.role || "view" : "owner",
+      },
+      operation,
+      fileId,
+      path,
+      timestamp: Date.now(),
+    };
+    const activities = vaultYdoc.getArray<WorkspaceActivity>("workspace-activity");
+    activities.push([activity]);
+    if (activities.length > 300) activities.delete(0, activities.length - 300);
+  }, [chatClientId, invite?.role, isJoinRoute, myColor, myUsername, vaultYdoc]);
+
+  const vault: Vault | undefined = privateRepo ? {
+    id: privateRepo.id,
+    name: privateRepo.displayName.split("/").pop() || privateRepo.displayName,
+    urlSlug: String(privateRepo.id),
+    githubRepo: privateRepo.repoFullName,
+    lastSyncAt: null,
+    createdAt: new Date(privateRepo.createdAt),
+  } : undefined;
+
+  const refreshCabinetView = useCallback(() => {
+    setNotes(readCabinetNotes(vaultYdoc, privateRepo?.id || 0));
+    setEmptyFolders(visibleFolderPaths(vaultYdoc));
+    setDirty(hasUnsyncedChanges(vaultYdoc));
+  }, [privateRepo?.id, vaultYdoc]);
+
+  const awarenessNote = notes.find((note) => note.id === activeNoteId);
 
   useEffect(() => {
-    vaultAwareness.setLocalStateField('user', {
+    const filesMap = getFilesMap(vaultYdoc);
+    const foldersMap = getFoldersMap(vaultYdoc);
+    filesMap.observeDeep(refreshCabinetView);
+    foldersMap.observe(refreshCabinetView);
+    refreshCabinetView();
+    return () => {
+      filesMap.unobserveDeep(refreshCabinetView);
+      foldersMap.unobserve(refreshCabinetView);
+    };
+  }, [refreshCabinetView, vaultYdoc]);
+
+  useEffect(() => {
+    const activities = vaultYdoc.getArray<WorkspaceActivity>("workspace-activity");
+    const refresh = () => setWorkspaceActivities(activities.toArray().slice(-200));
+    activities.observe(refresh);
+    refresh();
+    return () => activities.unobserve(refresh);
+  }, [vaultYdoc]);
+
+  useEffect(() => {
+    vaultAwareness.setLocalStateField("user", {
       name: myUsername,
       color: myColor,
-      clientId: vaultAwareness.clientID
+      clientId: vaultAwareness.clientID,
+      role: isJoinRoute ? invite?.role || "view" : "owner",
+      viewingFileId: activeNoteId || undefined,
+      viewingFilePath: awarenessNote ? fullNotePath(awarenessNote) : undefined,
     });
-  }, [myUsername, myColor, vaultAwareness]);
-
-  useEffect(() => {
-    const messagesArray = vaultYdoc.getArray<ChatMessage>('chat-messages');
-    const observer = (event: Y.YArrayEvent<ChatMessage>) => {
-      const hasRemoteMessage = Array.from(event.changes.added).some(item => {
-        return (item.content.getContent() as ChatMessage[]).some(message => {
-          return message.sessionId && message.sessionId !== chatClientId;
-        });
-      });
-
-      if (hasRemoteMessage && !showChatRef.current) {
-        setHasUnread(true);
-      }
-    };
-    messagesArray.observe(observer);
-    return () => messagesArray.unobserve(observer);
-  }, [vaultYdoc, chatClientId]);
+  }, [activeNoteId, awarenessNote, invite?.role, isJoinRoute, myColor, myUsername, vaultAwareness]);
 
   useEffect(() => {
     showChatRef.current = showChat;
     if (showChat) setHasUnread(false);
   }, [showChat]);
 
-  // Get private repo
-  const { data: savedRepos = [], isLoading: reposLoading } = useQuery<SavedRepoLocal[]>({
-    queryKey: ["/api/repos"],
-    queryFn: () => getSavedRepos(),
-    enabled: !isJoinRoute,
-  });
-  const privateRepo = savedRepos.find(r => r.repoFullName.split('/')[1] === slug || r.repoFullName === slug);
-  const githubToken = privateRepo ? sessionStorage.getItem(`gh-token-${slug}`) : null;
-
-  const [localNotes, setLocalNotes] = useState<Note[]>([]);
-  const [isSyncing, setIsSyncing] = useState(false);
-
-  const vaultLoading = reposLoading;
-  const vault = privateRepo ? { id: privateRepo.id, name: privateRepo.displayName.split('/').pop() || privateRepo.displayName, slug: slug, urlSlug: slug, githubRepo: privateRepo.repoFullName } as unknown as Vault : undefined;
-
-  // Auto-authenticate once a token is available for this repo
   useEffect(() => {
-    if (githubToken && !authenticated) {
-      setAuthenticated(true);
+    if (!dirty) return;
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", beforeUnload);
+    return () => window.removeEventListener("beforeunload", beforeUnload);
+  }, [dirty]);
+
+  useEffect(() => {
+    const validIds = new Set(notes.map((note) => note.id));
+    setOpenTabs((current) => current.filter((id) => validIds.has(id)));
+    if (activeTabId && !validIds.has(activeTabId)) {
+      const next = notes[0]?.id || null;
+      setActiveTabId(next);
+      setActiveNoteId(next);
     }
-  }, [githubToken, authenticated]);
+    if (splitViewNoteId && !validIds.has(splitViewNoteId)) setSplitViewNoteId(null);
+  }, [activeTabId, notes, splitViewNoteId]);
+
+  const persistScopes = useCallback((scopes: string[]) => {
+    setSelectedScopes(scopes);
+    ownerSessionRef.current?.updateControl({
+      selectedScopes: scopes,
+      syncing: syncingRef.current,
+      workspaceName: vault?.name || "Agent workspace",
+    });
+    if (privateRepo) {
+      updateSavedRepo(privateRepo.id, { selectedRootScopes: scopes });
+      void queryClient.invalidateQueries({ queryKey: ["saved-repos"] });
+    }
+  }, [privateRepo, vault?.name]);
 
   useEffect(() => {
-    activeNoteIdRef.current = activeNoteId;
-  }, [activeNoteId]);
+    if (isJoinRoute || !privateRepo || !authenticated) return;
+    const saved = getSavedRepos().find((repo) => repo.id === privateRepo.id);
+    const persisted = saved?.selectedRootScopes || [];
+    if (
+      persisted.length !== selectedScopes.length ||
+      persisted.some((scope, index) => scope !== selectedScopes[index])
+    ) {
+      updateSavedRepo(privateRepo.id, { selectedRootScopes: selectedScopes });
+    }
+  }, [authenticated, isJoinRoute, privateRepo, selectedScopes]);
 
-  useEffect(() => {
-    openTabsLengthRef.current = openTabs.length;
-  }, [openTabs.length]);
-
-
-  useEffect(() => {
-    if (!isJoinRoute) return;
-    const filesMap = vaultYdoc.getMap<Y.Map<any>>("files");
-    const fileObservers = new Map<Y.Map<any>, (event: Y.YMapEvent<any>) => void>();
-
-    const buildNotes = () => Array.from(filesMap.keys()).map(key => {
-      const fileMap = filesMap.get(key);
-      return {
-        id: Number(fileMap?.get("id") ?? parseInt(key, 10)),
-        vaultId: 0,
-        filename: fileMap?.get("filename") || "Untitled",
-        path: fileMap?.get("path") || "/",
-        content: ""
-      } as Note;
-    }).sort((a, b) => a.filename.localeCompare(b.filename));
-
-    const reconcileFileObservers = () => {
-      const currentFileMaps = new Set<Y.Map<any>>();
-
-      for (const fileMap of Array.from(filesMap.values())) {
-        currentFileMaps.add(fileMap);
-        if (fileObservers.has(fileMap)) continue;
-
-        const observer = (event: Y.YMapEvent<any>) => {
-          if (
-            event.keysChanged.has("id") ||
-            event.keysChanged.has("filename") ||
-            event.keysChanged.has("path")
-          ) {
-            updateFiles();
-          }
-        };
-
-        fileMap.observe(observer);
-        fileObservers.set(fileMap, observer);
-      }
-
-      for (const [fileMap, observer] of Array.from(fileObservers.entries())) {
-        if (!currentFileMaps.has(fileMap)) {
-          fileMap.unobserve(observer);
-          fileObservers.delete(fileMap);
-        }
-      }
-    };
-
-    const updateFiles = () => {
-      reconcileFileObservers();
-      const newFiles = buildNotes();
-      setJoinNotes(newFiles);
-
-      if (newFiles.length > 0 && activeNoteIdRef.current === null && openTabsLengthRef.current === 0) {
-        const firstFileId = newFiles[0].id;
-        activeNoteIdRef.current = firstFileId;
-        openTabsLengthRef.current = 1;
-        setActiveNoteId(firstFileId);
-        setOpenTabs([firstFileId]);
-        setActiveTabId(firstFileId);
-      }
-    };
-
-    filesMap.observe(updateFiles);
-    updateFiles();
-    return () => {
-      filesMap.unobserve(updateFiles);
-      for (const [fileMap, observer] of fileObservers) {
-        fileMap.unobserve(observer);
-      }
-    };
-  }, [isJoinRoute, vaultYdoc]);
-
-  if (joinError) {
-    return (
-      <div className="min-h-screen bg-[hsl(var(--obsidian-bg))] flex items-center justify-center p-4">
-        <Card className="max-w-md bg-[hsl(var(--obsidian-panel))] border-[hsl(var(--obsidian-border))]">
-          <CardHeader>
-            <CardTitle className="text-red-300">Cannot Join Session</CardTitle>
-            <div className="text-sm text-muted-foreground">{joinError}</div>
-          </CardHeader>
-        </Card>
-      </div>
-    );
-  }
-
-  useEffect(() => {
-    if (!isJoinRoute) return;
-    
+  const loadOwnerCabinet = useCallback(async (branchOverride?: string) => {
+    if (!githubToken || !privateRepo) return;
+    loadAbortRef.current?.abort();
+    const abortController = new AbortController();
+    loadAbortRef.current = abortController;
+    setLoadingCabinet(true);
+    setLoadError("");
+    setMissingRepository(false);
+    setBranchIssue(null);
+    let repositoryValidated = false;
     try {
-      const searchParams = new URLSearchParams(window.location.search);
-      const token = searchParams.get("token") || window.location.hash.replace('#', '');
+      const repository = await getRepository(githubToken, privateRepo.repoFullName);
+      repositoryValidated = true;
+      const branch = branchOverride || privateRepo.defaultBranch || repository.defaultBranch;
+      try {
+        await getBranch(githubToken, repository.fullName, branch);
+      } catch (error) {
+        if (error instanceof GitHubApiError && error.status === 404) {
+          if (branch !== repository.defaultBranch) {
+            setBranchIssue({ requested: branch, fallback: repository.defaultBranch });
+          } else {
+            setLoadError(`Branch '${branch}' was not found in '${repository.fullName}'.`);
+          }
+          return;
+        }
+        throw error;
+      }
+
+      const root = await getRootSnapshot(githubToken, repository.fullName, branch);
+      const available = new Set(root.scopes.map((scope) => scope.key));
+      const stored = privateRepo.selectedRootScopes;
+      const scopes = (stored === undefined ? defaultRootScopes(root.scopes) : stored)
+        .filter((scope) => available.has(scope));
+      const content: ScopeContent[] = [];
+      for (const scopeKey of scopes) {
+        const scope = root.scopes.find((candidate) => candidate.key === scopeKey)!;
+        const loaded = await loadScopeSnapshot({
+          token: githubToken,
+          repoFullName: repository.fullName,
+          branch,
+          scope,
+          rootMarkdown: root.rootMarkdown,
+          signal: abortController.signal,
+          onProgress: (completed, total) => setLoadProgress({ scope: scope.label, completed, total }),
+        });
+        content.push({ scope: scopeKey, ...loaded });
+      }
+
+      hydrateSelectedScopes(vaultYdoc, content);
+      baselineRef.current = content;
+      setRootSnapshot(root);
+      setBaseCommitSha(root.commitSha);
+      setBaseTreeSha(root.treeSha);
+      setWorkingBranch(branch);
+      setAuthenticated(true);
+      setSharedName(vault?.name || repository.name);
+      persistScopes(scopes);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      if (error instanceof GitHubApiError && error.status === 404 && !repositoryValidated) {
+        setMissingRepository(true);
+        try {
+          const user = await getAuthenticatedUser(githubToken);
+          setCreationLogin(user.login);
+        } catch {
+          setCreationLogin("");
+        }
+      } else {
+        setLoadError(repositoryErrorMessage(error));
+      }
+    } finally {
+      if (loadAbortRef.current === abortController) loadAbortRef.current = null;
+      setLoadProgress(null);
+      setLoadingCabinet(false);
+    }
+  }, [githubToken, persistScopes, privateRepo, vault?.name, vaultYdoc]);
+
+  const loadedRepoRef = useRef("");
+  useEffect(() => {
+    if (isJoinRoute || reposLoading || !privateRepo || !githubToken) return;
+    const key = `${privateRepo.id}:${githubToken}`;
+    if (loadedRepoRef.current === key) return;
+    loadedRepoRef.current = key;
+    void loadOwnerCabinet();
+  }, [githubToken, isJoinRoute, loadOwnerCabinet, privateRepo, reposLoading]);
+
+  useEffect(() => {
+    if (!isJoinRoute) return;
+    try {
+      const token = window.location.hash.replace(/^#/, "") || new URLSearchParams(window.location.search).get("token");
       if (!token) throw new Error("No token");
       const parsed = decodeInvite(token) as InvitePayload;
       if (parsed.v !== 1) throw new Error("Unsupported invite version");
       setInvite(parsed);
-      joinCollaboration(vaultYdoc, vaultAwareness, parsed, setJoinStatus).then((session) => {
+      void joinCollaboration(vaultYdoc, vaultAwareness, parsed, (status) => {
+        setJoinStatus(status);
+        setSessionState(status.includes("reconnecting") ? "reconnecting" : status.startsWith("Connected") ? "connected" : status === "Session stopped" ? "stopped" : "waiting");
+      }, {
+        onChat: appendChatMessage,
+        onControl: (control) => {
+          setSelectedScopes(control.selectedScopes);
+          syncingRef.current = control.syncing;
+          setSyncing(control.syncing);
+          setSharedName(control.workspaceName);
+        },
+      }).then((session) => {
         joinSessionRef.current = session;
       });
     } catch {
       setJoinError("Invalid private invite link.");
     }
     return () => joinSessionRef.current?.stop();
-  }, [isJoinRoute, vaultYdoc, vaultAwareness]);
+  }, [appendChatMessage, isJoinRoute, vaultAwareness, vaultYdoc]);
 
-  const notes = isJoinRoute ? joinNotes : localNotes;
-  const refetchNotes = async () => {
-    if (!githubToken || !privateRepo) return;
-    setIsSyncing(true);
-    try {
-      const files = await listGitHubFiles(githubToken, privateRepo.repoFullName, privateRepo.defaultBranch);
-      setLocalNotes(files.map((f, i) => ({
-        id: i + 1,
-        vaultId: privateRepo.id,
-        path: f.path.substring(0, f.path.lastIndexOf('/') + 1) || "/",
-        filename: f.name,
-        content: "",
-        githubSha: f.sha
-      } as unknown as Note)));
-    } catch (e) {
-      // failed to fetch
-    }
-    setIsSyncing(false);
-  };
+  useEffect(() => () => {
+    loadAbortRef.current?.abort();
+    joinSessionRef.current?.stop();
+    ownerSessionRef.current?.stop();
+  }, []);
 
   useEffect(() => {
-    if (authenticated && githubToken && privateRepo) {
-      refetchNotes();
+    if (activeNoteId || notes.length === 0) return;
+    const preferred = notes.find((note) => fullNotePath(note).toLowerCase() === ".agents/readme.md")
+      || notes.find((note) => fullNotePath(note).toLowerCase() === ".agents/agents.md")
+      || notes[0];
+    setActiveNoteId(preferred.id);
+    setActiveTabId(preferred.id);
+    setOpenTabs((current) => current.includes(preferred.id) ? current : [...current, preferred.id]);
+  }, [activeNoteId, notes]);
+
+  const availableScopes = useMemo(() => {
+    const scopes = new Map<string, GitHubRootScope>();
+    for (const scope of rootSnapshot?.scopes || []) scopes.set(scope.key, scope);
+    for (const path of emptyFolders) {
+      const top = path.split("/")[0];
+      if (top && !scopes.has(top)) scopes.set(top, { key: top, label: top, kind: "folder", sha: "" });
     }
-  }, [authenticated, githubToken, privateRepo]);
-
-  // Synchronize localNotes into the Y.Doc (max 20 files)
-  useEffect(() => {
-    if (!authenticated) return;
-
-    const filesMap = vaultYdoc.getMap<Y.Map<any>>("files");
-    const notesToSync = localNotes.slice(0, 20); // enforce max 20 files limit
-    
-    vaultYdoc.transact(() => {
-      notesToSync.forEach(note => {
-        const idStr = String(note.id);
-        let fileMap = filesMap.get(idStr);
-        
-        if (!fileMap) {
-          fileMap = new Y.Map();
-          filesMap.set(idStr, fileMap);
-          
-          fileMap.set("id", note.id);
-          fileMap.set("filename", note.filename);
-          fileMap.set("path", note.path);
-          
-          const contentText = new Y.Text();
-          if (note.content) {
-            contentText.insert(0, note.content);
-          }
-          fileMap.set("content", contentText);
-        } else {
-          if (fileMap.get("filename") !== note.filename) fileMap.set("filename", note.filename);
-          if (fileMap.get("path") !== note.path) fileMap.set("path", note.path);
-          
-          const contentText = fileMap.get("content") as Y.Text;
-          if (note.content && contentText.length === 0 && note.content.length > 0) {
-            contentText.insert(0, note.content);
-          }
-        }
-      });
+    for (const note of notes) {
+      const top = scopeForPath(fullNotePath(note));
+      if (top !== "/" && !scopes.has(top)) scopes.set(top, { key: top, label: top, kind: "folder", sha: "" });
+    }
+    return Array.from(scopes.values()).sort((left, right) => {
+      if (left.key === ".agents") return -1;
+      if (right.key === ".agents") return 1;
+      if (left.key === "/") return -1;
+      if (right.key === "/") return 1;
+      return left.label.localeCompare(right.label);
     });
-  }, [localNotes, vaultYdoc, authenticated]);
+  }, [emptyFolders, notes, rootSnapshot]);
 
-  
-  // Track meta map
-  useEffect(() => {
-    const metaMap = vaultYdoc.getMap("meta");
-    const updateMeta = () => {
-      setSyncedPeerCount((metaMap.get("peerCount") as number) || 1);
-      setSharedName((metaMap.get("name") as string) || "Shared Cabinet");
-    };
-    metaMap.observe(updateMeta);
-    updateMeta();
-    return () => metaMap.unobserve(updateMeta);
-  }, [vaultYdoc]);
-  
-  // Owner syncing meta map
-  useEffect(() => {
-    if (isJoinRoute || !authenticated || !vault) return;
-    const metaMap = vaultYdoc.getMap("meta");
-    if (metaMap.get("name") !== vault.name) {
-      metaMap.set("name", vault.name);
-    }
-  }, [vault, vaultYdoc, isJoinRoute, authenticated]);
-
-  useEffect(() => {
-    if (activeNoteId !== null && githubToken && privateRepo) {
-      const note = localNotes.find(n => n.id === activeNoteId);
-      if (note && !note.content) {
-        const fullPath = (note.path !== "/" ? note.path : "") + note.filename;
-        loadMarkdownFile(githubToken, privateRepo.repoFullName, fullPath, privateRepo.defaultBranch)
-          .then((loaded: any) => {
-            const content = loaded.content;
-            setLocalNotes(prev => prev.map(n => n.id === activeNoteId ? { ...n, content, githubSha: loaded.sha } : n));
+  const toggleScope = async (scope: GitHubRootScope, checked: boolean) => {
+    if (!privateRepo || !githubToken || !rootSnapshot || syncing) return;
+    try {
+      if (checked) {
+        if (scope.sha) {
+          const loaded = await loadScopeSnapshot({
+            token: githubToken,
+            repoFullName: privateRepo.repoFullName,
+            branch: workingBranch,
+            scope,
+            rootMarkdown: rootSnapshot.rootMarkdown,
           });
-      }
-    }
-  }, [activeNoteId, localNotes, githubToken, privateRepo]);
-
-  const activeNote = isJoinRoute ? joinNotes.find(n => n.id === activeNoteId) : localNotes.find(n => n.id === activeNoteId);
-
-  // Create note mutation
-  const createNoteMutation = useMutation({
-    mutationFn: async (noteData: { filename: string; path?: string; content?: string }) => {
-      const newNote: Note = {
-        id: Math.max(0, ...localNotes.map(n => n.id)) + 1,
-        vaultId: privateRepo!.id,
-        path: noteData.path || "/",
-        filename: noteData.filename,
-        content: noteData.content ?? "",
-      } as unknown as Note;
-      setLocalNotes(prev => [...prev, newNote]);
-      return newNote;
-    },
-    onSuccess: () => {
-      toast({
-        title: "Success",
-        description: "Note created successfully",
-      });
-    },
-    onError: () => {
-      toast({
-        title: "Error",
-        description: "Failed to create note",
-        variant: "destructive",
-      });
-    },
-  });
-
-  // Update note mutation
-  const updateNoteMutation = useMutation({
-    mutationFn: async ({ id, content }: { id: number; content: string }) => {
-      setLocalNotes(prev => prev.map(n => n.id === id ? { ...n, content } : n));
-      return { id, content };
-    },
-  });
-
-  // GitHub sync mutation
-  const syncMutation = useMutation({
-    mutationFn: async () => {
-        if (!githubToken || !privateRepo) throw new Error("No token or repo");
-        let targetBranch = privateRepo.defaultBranch;
-        let branchCreated = false;
-
-        for (const note of localNotes) {
-          if (note.content) {
-             const fullPath = (note.path !== "/" ? note.path : "") + note.filename;
-             const previousSha = (note as any).githubSha || "";
-             
-             try {
-                const res = await commitMarkdownFile({
-                   token: githubToken,
-                   repoFullName: privateRepo.repoFullName,
-                   path: fullPath,
-                   branch: targetBranch,
-                   previousSha: previousSha,
-                   content: note.content,
-                   message: `Update ${note.filename} via Marktwin`
-                });
-                if (!res.ok) {
-                   throw new Error("CONFLICT_DETECTED");
-                }
-                setLocalNotes(prev => prev.map(n => n.id === note.id ? { ...n, githubSha: res.sha } : n));
-             } catch (err: any) {
-                if (err.message === "CONFLICT_DETECTED" || err.message.includes("409")) {
-                   if (!branchCreated) {
-                      const now = new Date();
-                      const dd = String(now.getDate()).padStart(2, '0');
-                      const hh = String(now.getHours()).padStart(2, '0');
-                      const mm = String(now.getMinutes()).padStart(2, '0');
-                      const ss = String(now.getSeconds()).padStart(2, '0');
-                      const newBranch = `${privateRepo.defaultBranch}-${dd}-${hh}-${mm}-${ss}`;
-                      
-                      await createBranch(githubToken, privateRepo.repoFullName, privateRepo.defaultBranch, newBranch);
-                      targetBranch = newBranch;
-                      branchCreated = true;
-                   }
-                   
-                   const newBranchFiles = await listGitHubFiles(githubToken, privateRepo.repoFullName, targetBranch);
-                   const newBranchFile = newBranchFiles.find(f => f.path === fullPath);
-                   
-                   const retryRes = await commitMarkdownFile({
-                       token: githubToken,
-                       repoFullName: privateRepo.repoFullName,
-                       path: fullPath,
-                       branch: targetBranch,
-                       previousSha: newBranchFile ? newBranchFile.sha : "",
-                       content: note.content,
-                       message: `Update ${note.filename} via Marktwin (conflict resolution branch)`
-                   });
-                   if (retryRes.ok) {
-                       setLocalNotes(prev => prev.map(n => n.id === note.id ? { ...n, githubSha: retryRes.sha } : n));
-                   } else {
-                       throw new Error("Failed to push to fallback branch");
-                   }
-                } else {
-                   throw err;
-                }
-             }
-          }
+          const scopeContent = { scope: scope.key, ...loaded };
+          mergeScopeContent(vaultYdoc, scopeContent);
+          baselineRef.current = [...baselineRef.current.filter((content) => content.scope !== scope.key), scopeContent];
         }
-        return { branchCreated, targetBranch };
-    },
-    onSuccess: async (data: any) => {
-      if (data?.branchCreated) {
-        if (privateRepo) {
-          updateSavedRepo(privateRepo.id, { defaultBranch: data.targetBranch });
-          queryClient.invalidateQueries({ queryKey: ["/api/repos"] });
-        }
-        toast({
-          title: "Conflict Detected",
-          description: `Conflict when merging. New branch '${data.targetBranch}' created. Conflict resolution will come in the future!`,
-          duration: 6000,
-        });
+        persistScopes(Array.from(new Set([...selectedScopes, scope.key])));
       } else {
-        toast({
-          title: "Success",
-          description: "Committed directly to GitHub",
-          duration: 3000,
-        });
+        removeCleanScope(vaultYdoc, scope.key);
+        baselineRef.current = baselineRef.current.filter((content) => content.scope !== scope.key);
+        persistScopes(selectedScopes.filter((key) => key !== scope.key));
       }
-    },
-    onError: (error: any) => {
-        toast({
-          title: "Error",
-          description: error.message || "Failed to sync with GitHub",
-          variant: "destructive",
-          duration: 3000,
+    } catch (error) {
+      toast({ title: "Folder selection unchanged", description: repositoryErrorMessage(error), variant: "destructive" });
+    }
+  };
+
+  const createMissingRepository = async () => {
+    if (!githubToken || !privateRepo) return;
+    setCreatingRepository(true);
+    try {
+      const { repo } = parseRepo(privateRepo.repoFullName);
+      const created = await createPrivateRepository(githubToken, repo);
+      updateSavedRepo(privateRepo.id, {
+        displayName: created.fullName,
+        repoFullName: created.fullName,
+        defaultBranch: created.defaultBranch,
+        selectedRootScopes: [".agents"],
+      });
+      sessionStorage.setItem(`gh-token-${privateRepo.id}`, githubToken);
+      await queryClient.invalidateQueries({ queryKey: ["saved-repos"] });
+      setMissingRepository(false);
+      loadedRepoRef.current = "";
+      window.location.reload();
+    } catch (error) {
+      setLoadError(repositoryErrorMessage(error));
+    } finally {
+      setCreatingRepository(false);
+    }
+  };
+
+  const useDefaultBranch = async () => {
+    if (!privateRepo || !branchIssue) return;
+    updateSavedRepo(privateRepo.id, { defaultBranch: branchIssue.fallback });
+    await queryClient.invalidateQueries({ queryKey: ["saved-repos"] });
+    setBranchIssue(null);
+    loadedRepoRef.current = "";
+    await loadOwnerCabinet(branchIssue.fallback);
+  };
+
+  const workspaceChanges = useMemo<WorkspaceChange[]>(() => (
+    describeWorkspaceChanges(vaultYdoc, baselineRef.current)
+  ), [dirty, emptyFolders, notes, vaultYdoc]);
+
+  const requestSync = () => {
+    try {
+      assertWorkspaceWithinScopes(vaultYdoc, selectedScopes);
+      if (workspaceChanges.length === 0) {
+        toast({ title: "Nothing to sync", description: "The selected workspace matches GitHub." });
+        return;
+      }
+      setShowChanges(true);
+    } catch (error) {
+      toast({ title: "Review required", description: repositoryErrorMessage(error), variant: "destructive" });
+    }
+  };
+
+  const handleSync = async () => {
+    if (!githubToken || !privateRepo || !baseCommitSha || !baseTreeSha) return;
+    let changes;
+    try {
+      assertWorkspaceWithinScopes(vaultYdoc, selectedScopes);
+      changes = collectAtomicChanges(vaultYdoc);
+      if (changes.length === 0) return;
+      setShowChanges(false);
+      syncingRef.current = true;
+      setSyncing(true);
+      setSessionState("syncing");
+      ownerSessionRef.current?.updateControl({ selectedScopes, syncing: true, workspaceName: vault?.name || "Agent workspace" });
+      const result = await commitAtomicChanges({
+        token: githubToken,
+        repoFullName: privateRepo.repoFullName,
+        branch: workingBranch,
+        baseCommitSha,
+        baseTreeSha,
+        changes,
+        message: commitMessage.trim() || "Update agent workspace via Marktwin",
+      });
+      if (result.branchCreated) {
+        updateSavedRepo(privateRepo.id, { defaultBranch: result.branch });
+        setWorkingBranch(result.branch);
+      }
+
+      const root = await getRootSnapshot(githubToken, privateRepo.repoFullName, result.branch);
+      const available = new Set(root.scopes.map((scope) => scope.key));
+      const scopes = selectedScopes.filter((scope) => available.has(scope));
+      const content: ScopeContent[] = [];
+      for (const scopeKey of scopes) {
+        const scope = root.scopes.find((candidate) => candidate.key === scopeKey)!;
+        const loaded = await loadScopeSnapshot({
+          token: githubToken,
+          repoFullName: privateRepo.repoFullName,
+          branch: result.branch,
+          scope,
+          rootMarkdown: root.rootMarkdown,
+          onProgress: (completed, total) => setLoadProgress({ scope: scope.label, completed, total }),
         });
+        content.push({ scope: scopeKey, ...loaded });
+      }
+      hydrateSelectedScopes(vaultYdoc, content);
+      baselineRef.current = content;
+      setRootSnapshot(root);
+      setBaseCommitSha(root.commitSha);
+      setBaseTreeSha(root.treeSha);
+      persistScopes(scopes);
+      setShowChanges(false);
+      await queryClient.invalidateQueries({ queryKey: ["saved-repos"] });
+      setSessionState(result.branchCreated ? "conflict" : ownerSessionRef.current ? "connected" : "stopped");
+      toast(result.branchCreated ? {
+        title: "Conflict detected",
+        description: `GitHub advanced while you were working. Your changes are safe on '${result.branch}', which is now this cabinet's working branch.`,
+        duration: 7000,
+      } : {
+        title: "Synced to GitHub",
+        description: `${changes.length} staged change${changes.length === 1 ? "" : "s"} published in one commit.`,
+      });
+    } catch (error) {
+      toast({ title: "Sync failed", description: repositoryErrorMessage(error), variant: "destructive" });
+    } finally {
+      setLoadProgress(null);
+      syncingRef.current = false;
+      setSyncing(false);
+      ownerSessionRef.current?.updateControl({ selectedScopes, syncing: false, workspaceName: vault?.name || "Agent workspace" });
+      setSessionState((current) => current === "conflict" ? current : ownerSessionRef.current ? "connected" : "stopped");
     }
-  });
+  };
 
-  // Auto-sync effect
+  const structuralReadOnly = syncing || (isJoinRoute && !canEditSession(invite?.role || "view"));
+  const defaultCreationPath = useMemo(() => {
+    if (selectedScopes.includes(".agents")) return ".agents/";
+    const folder = selectedScopes.find((scope) => scope !== "/");
+    return folder ? `${folder}/` : "/";
+  }, [selectedScopes]);
+
+  const creationFolders = useMemo(() => {
+    const paths = new Set<string>();
+    for (const scope of selectedScopes) {
+      paths.add(scope === "/" ? "/" : normalizeDirectoryPath(scope));
+    }
+    for (const folder of emptyFolders) paths.add(normalizeDirectoryPath(folder));
+    for (const note of notes) paths.add(normalizeDirectoryPath(note.path));
+    return Array.from(paths).sort((left, right) => {
+      if (left === defaultCreationPath) return -1;
+      if (right === defaultCreationPath) return 1;
+      return left.localeCompare(right);
+    });
+  }, [defaultCreationPath, emptyFolders, notes, selectedScopes]);
+
+  const effectiveCreationPath = creationFolders.includes(creationPath)
+    ? creationPath
+    : defaultCreationPath;
+
   useEffect(() => {
-    const interval = setInterval(() => {
-      syncMutation.mutate();
-    }, 15 * 60 * 1000); // 15 minutes
-
-    return () => clearInterval(interval);
-  }, [slug, syncMutation]);
-
-  const handleNoteSelect = (noteId: number) => {
-    if (!openTabs.includes(noteId)) setOpenTabs(prev => [...prev, noteId]);
-    setActiveTabId(noteId);
-    setActiveNoteId(noteId);
-  };
-
-  const handleTabClose = (noteId: number) => {
-    setOpenTabs((prev) => prev.filter(id => id !== noteId));
-    if (activeTabId === noteId) {
-      // Switch to next tab, or previous, or null
-      const idx = openTabs.indexOf(noteId);
-      const nextTab = openTabs[idx + 1] || openTabs[idx - 1] || null;
-      setActiveTabId(nextTab);
-      setActiveNoteId(nextTab);
+    if (creationFolders.length > 0 && !creationFolders.includes(creationPath)) {
+      setCreationPath(defaultCreationPath);
     }
-    if (splitViewNoteId === noteId) {
-      setSplitViewNoteId(null);
+  }, [creationFolders, creationPath, defaultCreationPath]);
+
+  const selectNote = (id: string) => {
+    if (!openTabs.includes(id)) setOpenTabs((current) => [...current, id]);
+    setActiveNoteId(id);
+    setActiveTabId(id);
+    setMobilePanel("document");
+  };
+
+  const closeTab = (id: string) => {
+    const index = openTabs.indexOf(id);
+    const remaining = openTabs.filter((tabId) => tabId !== id);
+    setOpenTabs(remaining);
+    if (activeTabId === id) {
+      const next = remaining[index] || remaining[index - 1] || null;
+      setActiveTabId(next);
+      setActiveNoteId(next);
     }
+    if (splitViewNoteId === id) setSplitViewNoteId(null);
   };
 
-  const toggleSplitView = (noteId: number) => {
-    setSplitViewNoteId(prev => prev === noteId ? null : noteId);
-  };
-
-  const handleSync = () => {
-    syncMutation.mutate();
-  };
-
-  const handleNewFile = (path: string) => {
-    setCreatingFile(true);
-    setNewFileName("");
-    setNewFilePath(path);
-  };
-
-  const handleNewFileSubmit = () => {
-    if (newFileName.trim()) {
-      let filename = newFileName.trim();
-      if (!filename.includes('.')) filename += '.md';
-      createNoteMutation.mutate({ filename, path: newFilePath });
+  const handleCreateNote = (path = effectiveCreationPath, filename?: string, content = "") => {
+    if (!filename) {
+      setCreatingFile(true);
+      setNewFilePath(normalizeDirectoryPath(path));
+      setNewFileName("");
+      return;
+    }
+    try {
+      const destination = normalizeDirectoryPath(path);
+      const candidate = destination === "/" ? filename : `${destination}${filename}`;
+      if (!selectedScopes.some((scope) => pathBelongsToScope(candidate, scope))) {
+        throw new Error("Choose a destination inside the shared workspace scopes.");
+      }
+      const id = addMarkdownNote(vaultYdoc, { filename, path, content });
+      recordActivity("created Markdown", id, `${normalizeDirectoryPath(path) === "/" ? "" : normalizeDirectoryPath(path)}${filename}`);
       setCreatingFile(false);
       setNewFileName("");
+      selectNote(id);
+    } catch (error) {
+      toast({ title: "Could not create Markdown", description: repositoryErrorMessage(error), variant: "destructive" });
     }
   };
 
-  const handleNewFileCancel = () => {
-    setCreatingFile(false);
-    setNewFileName("");
-  };
-
-  // Create folder mutation
-  const createFolderMutation = useMutation({
-    mutationFn: async (path: string) => {
-      setIsCreatingFolder(true);
+  const handleImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    for (const file of files) {
       try {
-        const response = await apiRequest("POST", `/api/vaults/${slug}/folders`, { path });
-        return response.json();
-      } finally {
-        setIsCreatingFolder(false);
+        if (!file.name.toLowerCase().endsWith(".md")) throw new Error("Marktwin imports Markdown (.md) files only.");
+        handleCreateNote(effectiveCreationPath, file.name, await file.text());
+      } catch (error) {
+        toast({ title: `Could not import ${file.name}`, description: repositoryErrorMessage(error), variant: "destructive" });
       }
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [`/api/vaults/${slug}/notes`] });
-      toast({
-        title: "Success",
-        description: "Folder created successfully",
-      });
-    },
-    onError: (error: any) => {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to create folder",
-        variant: "destructive",
-      });
-    },
-  });
-
-  // Move folder mutation
-  const moveFolderMutation = useMutation({
-    mutationFn: async ({ oldPath, newPath }: { oldPath: string; newPath: string }) => {
-      setIsMovingFolder(true);
-      try {
-        const response = await apiRequest("POST", `/api/vaults/${slug}/folders/move`, {
-          sourcePath: oldPath,
-          destPath: newPath,
-        });
-        return response.json();
-      } finally {
-        setIsMovingFolder(false);
-      }
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [`/api/vaults/${slug}/notes`] });
-      toast({
-        title: "Success",
-        description: "Folder moved successfully",
-      });
-    },
-    onError: (error: any) => {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to move folder",
-        variant: "destructive",
-      });
-    },
-  });
-
-  // Delete folder mutation
-  const deleteFolderMutation = useMutation({
-    mutationFn: async (path: string) => {
-      const response = await apiRequest("DELETE", `/api/vaults/${slug}/folders`, { path });
-      return response.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [`/api/vaults/${slug}/notes`] });
-      toast({
-        title: "Success",
-        description: "Folder deleted successfully",
-      });
-    },
-    onError: (error: any) => {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to delete folder",
-        variant: "destructive",
-      });
-    },
-  });
-
-  // Rename note mutation
-  const renameNoteMutation = useMutation({
-    mutationFn: async ({ id, filename }: { id: number; filename: string }) => {
-      const response = await apiRequest("PUT", `/api/notes/${id}`, { filename });
-      return response.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [`/api/vaults/${slug}/notes`] });
-      toast({ title: "Success", description: "File renamed successfully" });
-    },
-    onError: () => {
-      toast({ title: "Error", description: "Failed to rename file", variant: "destructive" });
-    },
-  });
-
-  // Delete note mutation
-  const deleteNoteMutation = useMutation({
-    mutationFn: async (id: number) => {
-      const response = await apiRequest("DELETE", `/api/notes/${id}`);
-      return response.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [`/api/vaults/${slug}/notes`] });
-      toast({ title: "Success", description: "File deleted successfully" });
-    },
-    onError: () => {
-      toast({ title: "Error", description: "Failed to delete file", variant: "destructive" });
-    },
-  });
-
-  const handleRenameNote = (id: number, filename: string) => {
-    renameNoteMutation.mutate({ id, filename });
-  };
-
-  const handleDeleteNote = (id: number) => {
-    deleteNoteMutation.mutate(id);
-  };
-
-  // Duplicate note handler
-  const handleDuplicateNote = (note: Note) => {
-    // Find a unique filename in the same path
-    const base = note.filename.replace(/(\.[^.]*)$/, "");
-    const ext = note.filename.includes('.') ? note.filename.slice(note.filename.lastIndexOf('.')) : '.md';
-    let copyName = `${base}-copy${ext}`;
-    let i = 2;
-    while (notes.some(n => n.path === note.path && n.filename === copyName)) {
-      copyName = `${base}-copy-${i}${ext}`;
-      i++;
     }
-    createNoteMutation.mutate({ filename: copyName, path: note.path, content: note.content });
+    event.target.value = "";
   };
 
-  const moveNoteMutation = useMutation({
-    mutationFn: async ({ noteId, newPath }: { noteId: number; newPath: string }) => {
-      return apiRequest("PUT", `/api/notes/${noteId}`, { path: newPath });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [`/api/vaults/${vault?.urlSlug}/notes`] });
-      toast({
-        title: "Success",
-        description: "Note moved successfully",
-      });
-    },
-    onError: (error: any) => {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to move note",
-        variant: "destructive",
-      });
-    },
-  });
-
-  const handleMoveNote = (noteId: number, newPath: string) => {
-    moveNoteMutation.mutate({ noteId, newPath });
-  };
-
-  const uploadFileMutation = useMutation({
-    mutationFn: async ({ file, path }: { file: File; path: string }) => {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('path', path);
-      
-      const response = await fetch(`/api/vaults/${vault?.urlSlug}/upload`, {
-        method: 'POST',
-        body: formData,
-        credentials: 'include',
-      });
-      
-      if (!response.ok) {
-        throw new Error('Upload failed');
+  const handleCreateFolder = (parentPath: string, name: string) => {
+    try {
+      const path = joinFolderPath(parentPath, name);
+      if (!selectedScopes.some((scope) => pathBelongsToScope(`${path}/.gitkeep`, scope))) {
+        throw new Error("Create folders inside a selected workspace folder.");
       }
-      
-      return response.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [`/api/vaults/${vault?.urlSlug}/notes`] });
-      toast({
-        title: "Success",
-        description: "File uploaded successfully",
-      });
-    },
-    onError: (error: any) => {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to upload file",
-        variant: "destructive",
-      });
-    },
-  });
-
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files;
-    if (!files) return;
-
-    Array.from(files).forEach(file => {
-      const allowedTypes = [
-        'application/pdf',
-        'image/png',
-        'image/jpeg',
-        'image/jpg',
-        'image/gif',
-        'image/svg+xml',
-        'text/markdown',
-        'text/plain'
-      ];
-
-      if (allowedTypes.includes(file.type) || file.name.match(/\.(pdf|png|jpg|jpeg|gif|svg|md|txt)$/i)) {
-        uploadFileMutation.mutate({ file, path: "/" });
-      } else {
-        toast({
-          title: "Error",
-          description: `File type not supported: ${file.name}`,
-          variant: "destructive",
-        });
-      }
-    });
-    // Reset input
-    event.target.value = '';
-  };
-
-  const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    setIsDragOver(false);
-    
-    const files = Array.from(event.dataTransfer.files);
-    files.forEach(file => {
-      const allowedTypes = [
-        'application/pdf',
-        'image/png',
-        'image/jpeg',
-        'image/jpg',
-        'image/gif',
-        'image/svg+xml',
-        'text/markdown',
-        'text/plain'
-      ];
-
-      if (allowedTypes.includes(file.type) || file.name.match(/\.(pdf|png|jpg|jpeg|gif|svg|md|txt)$/i)) {
-        uploadFileMutation.mutate({ file, path: "/" });
-      } else {
-        toast({
-          title: "Error",
-          description: `File type not supported: ${file.name}`,
-          variant: "destructive",
-        });
-      }
-    });
-  };
-
-  const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    // Only show upload overlay for external file drags (not app-file-move or folder-move)
-    const types = event.dataTransfer.types;
-    if (
-      types.includes('Files') &&
-      !types.includes('app-file-move') &&
-      !types.includes('folder-move')
-    ) {
-      setIsDragOver(true);
+      createFolder(vaultYdoc, path);
+      recordActivity("created folder marker", undefined, path);
+    } catch (error) {
+      toast({ title: "Could not create folder", description: repositoryErrorMessage(error), variant: "destructive" });
     }
   };
 
-  const handleDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    setIsDragOver(false);
-  };
-
-  const handleContentChange = (content: string) => {
-    if (activeNoteId) {
-      updateNoteMutation.mutate({ id: activeNoteId, content });
+  const handleMoveFolder = (sourcePath: string, destinationPath: string) => {
+    try {
+      const name = sourcePath.split("/").pop() || sourcePath;
+      const targetPath = joinFolderPath(destinationPath, name);
+      if (!selectedScopes.some((scope) => pathBelongsToScope(`${targetPath}/.gitkeep`, scope))) {
+        throw new Error("Move folders only within the selected workspace scopes.");
+      }
+      moveFolder(vaultYdoc, sourcePath, targetPath);
+      recordActivity("moved folder", undefined, `${sourcePath} → ${targetPath}`);
+    } catch (error) {
+      toast({ title: "Could not move folder", description: repositoryErrorMessage(error), variant: "destructive" });
     }
   };
 
-  if (!slug && !isJoinRoute) return null;
+  const requestMoveFolder = (sourcePath: string, destinationPath: string) => {
+    try {
+      const name = sourcePath.split("/").pop() || sourcePath;
+      const targetPath = joinFolderPath(destinationPath, name);
+      setPendingMove({
+        sourcePath,
+        targetPath,
+        count: folderMarkdownCount(vaultYdoc, sourcePath),
+      });
+    } catch (error) {
+      toast({ title: "Could not move folder", description: repositoryErrorMessage(error), variant: "destructive" });
+    }
+  };
 
-  if (vaultLoading && !isJoinRoute) {
+  const startSharing = async (rotate = false) => {
+    if (ownerSessionRef.current && !rotate) {
+      setShowCollabDialog(true);
+      return;
+    }
+    try {
+      setShowShareProgress(true);
+      ownerSessionRef.current?.stop();
+      ownerSessionRef.current = null;
+      setCollabSession(null);
+      setPeerCount(0);
+      const session = await startOwnerCollaboration(vaultYdoc, vaultAwareness, () => {
+        setPeerCount(ownerSessionRef.current?.peerCount() || 0);
+      }, {
+        control: {
+          selectedScopes,
+          syncing: syncingRef.current,
+          workspaceName: vault?.name || "Agent workspace",
+        },
+        onChat: appendChatMessage,
+        onStatus: setSessionState,
+        initialChatMessages: chatMessages,
+      });
+      ownerSessionRef.current = session;
+      setCollabSession(session);
+      setShowCollabDialog(true);
+    } catch (error) {
+      setSessionState("offline");
+      toast({ title: "Failed to start sharing", description: repositoryErrorMessage(error), variant: "destructive" });
+    } finally {
+      setShowShareProgress(false);
+    }
+  };
+
+  const stopSharing = () => {
+    ownerSessionRef.current?.stop();
+    ownerSessionRef.current = null;
+    setCollabSession(null);
+    setPeerCount(0);
+    setShowCollabDialog(false);
+    setSessionState("stopped");
+  };
+
+  const sendChatMessage = (message: ChatMessage) => {
+    if (isJoinRoute) {
+      appendChatMessage(message);
+      joinSessionRef.current?.sendChat(message);
+      return;
+    }
+    if (ownerSessionRef.current) ownerSessionRef.current.sendChat(message);
+    else appendChatMessage(message);
+  };
+
+  const openDecisionCapture = (message: ChatMessage) => {
+    setDecisionMessage(message);
+    setDecisionText(message.message);
+    setDecisionTargetId(activeNoteId || notes[0]?.id || "");
+  };
+
+  const captureDecision = () => {
+    const note = notes.find((candidate) => candidate.id === decisionTargetId);
+    const fileMap = note ? getFilesMap(vaultYdoc).get(note.id) : undefined;
+    const content = fileMap?.get("content");
+    if (!note || !(content instanceof Y.Text) || !decisionMessage || !decisionText.trim()) return;
+    const decision: CapturedDecision = {
+      id: crypto.randomUUID(),
+      sourceMessageId: decisionMessage.id,
+      summary: decisionText.trim(),
+      targetFileId: note.id,
+      targetPath: fullNotePath(note),
+      capturedBy: {
+        sessionId: chatClientId,
+        displayName: myUsername,
+        color: myColor,
+        role: isJoinRoute ? invite?.role || "view" : "owner",
+      },
+      timestamp: Date.now(),
+    };
+    const separator = content.length > 0 && !content.toString().endsWith("\n") ? "\n" : "";
+    content.insert(content.length, `${separator}\n## Decision — ${new Date(decision.timestamp).toISOString().slice(0, 10)}\n\n${decision.summary}\n\n_Captured from discussion by ${decision.capturedBy.displayName}._\n`);
+    markNoteModified(vaultYdoc, note.id);
+    recordActivity("captured a decision", note.id, decision.targetPath);
+    setDecisionMessage(null);
+    selectNote(note.id);
+    toast({ title: "Decision staged", description: `Added to ${decision.targetPath}. Review it in Changes before Sync.` });
+  };
+
+  const discardOneChange = (change: WorkspaceChange) => {
+    try {
+      discardWorkspaceChange(vaultYdoc, change, baselineRef.current);
+    } catch (error) {
+      toast({ title: "Could not discard change", description: repositoryErrorMessage(error), variant: "destructive" });
+    }
+  };
+
+  const activeNote = notes.find((note) => note.id === activeNoteId);
+  const cabinetName = isJoinRoute ? sharedName : vault?.name || "Workspace";
+
+  if (joinError) {
     return (
-      <div className="min-h-screen bg-[hsl(var(--obsidian-bg))] flex items-center justify-center">
-        <div className="text-white">Loading cabinet...</div>
-      </div>
-    );
-  }
-
-  if (!vault && !isJoinRoute) {
-    return (
-      <div className="min-h-screen bg-[hsl(var(--obsidian-bg))] flex items-center justify-center">
-        <Card className="w-full max-w-md mx-4 bg-[hsl(var(--obsidian-sidebar))] border-[hsl(var(--obsidian-border))]">
-          <CardContent className="pt-6">
-            <div className="flex mb-4 gap-2">
-              <AlertCircle className="h-8 w-8 text-red-500" />
-              <h1 className="text-2xl font-bold text-white">Cabinet Not Found</h1>
-            </div>
-            <p className="mt-4 text-sm text-gray-400">
-              The cabinet "{slug}" does not exist.
-            </p>
-          </CardContent>
+      <div className="min-h-screen bg-[hsl(var(--obsidian-bg))] flex items-center justify-center p-4">
+        <Card className="max-w-md bg-[hsl(var(--obsidian-panel))] border-[hsl(var(--obsidian-border))]">
+          <CardHeader><CardTitle className="text-red-300">Cannot join session</CardTitle></CardHeader>
+          <CardContent className="text-sm text-muted-foreground">{joinError}</CardContent>
         </Card>
       </div>
     );
   }
 
-  if (!authenticated && !isJoinRoute) {
+  if (!isJoinRoute && !reposLoading && (!privateRepo || !githubToken)) {
     return (
-      <div className="min-h-screen bg-[hsl(var(--obsidian-bg))] flex items-center justify-center">
-        <Card className="w-full max-w-md mx-4 bg-[hsl(var(--obsidian-sidebar))] border-[hsl(var(--obsidian-border))]">
-          <CardHeader>
-            <CardTitle className="text-white flex items-center gap-2">
-              <Lock className="h-5 w-5" />
-              Cabinet: {vault?.name || "Private Cabinet"}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <p className="text-sm text-gray-400">
-              No GitHub token found in this browser session for this cabinet.
-            </p>
-            <Button
-              onClick={() => setLocation("/my-cabinets")}
-              className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
-            >
-              Go to My Cabinets
-            </Button>
+      <div className="min-h-screen bg-[hsl(var(--obsidian-bg))] flex items-center justify-center p-4">
+        <Card className="max-w-md bg-[hsl(var(--obsidian-panel))] border-[hsl(var(--obsidian-border))]">
+          <CardHeader><CardTitle>Cabinet access required</CardTitle></CardHeader>
+          <CardContent className="space-y-4 text-sm text-muted-foreground">
+            <p>Open this cabinet from My Cabinets and provide a GitHub token for this browser session.</p>
+            <Button onClick={() => setLocation("/")}>Back to My Cabinets</Button>
           </CardContent>
         </Card>
       </div>
@@ -861,471 +885,377 @@ export default function VaultPage() {
   }
 
   return (
-    <div 
-      className={`h-screen bg-[hsl(var(--obsidian-bg))] text-[hsl(var(--obsidian-text))] overflow-hidden flex relative transition-all duration-300`}
-      style={{ paddingRight: showChat ? `${chatWidth}px` : '0' }}
-      onDrop={handleDrop}
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-    >
-      {/* Drag overlay */}
-      {isDragOver && (
-        <div
-          className="absolute inset-0 bg-accent/20 border-2 border-dashed border-accent z-50 flex items-center justify-center"
-          onDragEnter={e => {
-            if (e.dataTransfer.types.includes("app-file-move") || e.dataTransfer.types.includes("folder-move")) {
-              e.preventDefault();
-              e.stopPropagation();
-              return;
-            }
-          }}
-          onDragOver={e => {
-            if (e.dataTransfer.types.includes("app-file-move") || e.dataTransfer.types.includes("folder-move")) {
-              e.preventDefault();
-              e.stopPropagation();
-              return;
-            }
-          }}
-        >
-          <div className="bg-[hsl(var(--obsidian-sidebar))] p-6 rounded-lg text-center">
-            <Upload className="h-12 w-12 text-accent mx-auto mb-4" />
-            <p className="text-xl font-semibold text-[hsl(var(--obsidian-text))] mb-2">Drop files here</p>
-            <p className="text-[hsl(var(--obsidian-text-muted))]">Supports PDF and image files</p>
-          </div>
-        </div>
-      )}
-      
-      {/* Sidebar (collapsible) */}
+    <div className="relative h-screen bg-[hsl(var(--obsidian-bg))] text-[hsl(var(--obsidian-text))] flex overflow-hidden pb-14 sm:pb-0">
       {!sidebarCollapsed && (
-        <div 
-          className="bg-[hsl(var(--obsidian-sidebar))] border-r border-[hsl(var(--obsidian-border))] flex flex-col transition-all duration-300 relative overflow-hidden"
-          style={{ width: `${sidebarWidth}px` }}
-        >
-          {/* Watermark - positioned to show right half */}
-          <div className="absolute inset-0 pointer-events-none opacity-[0.015] z-0 flex items-center">
-            <img
-              src="/logo_w.svg"
-              alt=""
-              className="max-w-[200%] h-auto object-contain -translate-x-1/2"
-            />
-          </div>
-          {/* Vault Header */}
+        <aside className={`${mobilePanel === "files" ? "flex" : "hidden"} absolute inset-0 z-20 w-full flex-shrink-0 flex-col bg-[hsl(var(--obsidian-sidebar))] border-r border-[hsl(var(--obsidian-border))] sm:relative sm:z-auto sm:flex sm:w-72`}>
           <div className="p-4 border-b border-[hsl(var(--obsidian-border))]">
-            <div className="flex items-center justify-between mb-3 min-w-0 overflow-hidden">
-              <div className="flex items-center min-w-0 overflow-hidden">
-                <Button 
-                  size="sm" 
-                  variant="ghost" 
-                  className="p-1 h-6 w-6 mr-1 flex-shrink-0" 
-                  onClick={() => setLocation("/")}
-                  title="Back to Home"
-                >
-                  <ChevronLeft className="h-4 w-4 text-[hsl(var(--obsidian-text-muted))]" />
-                </Button>
-                <h1 className="text-lg font-semibold text-[hsl(var(--obsidian-text))] truncate min-w-0">{isJoinRoute ? sharedName : vault?.name}</h1>
-              </div>
-              <div className="flex items-center space-x-2 flex-shrink-0 min-w-0 overflow-hidden max-w-full" style={{maxWidth: 'calc(100% - 1.5rem)'}}>
-                
-                {!isJoinRoute && vault?.githubRepo && (
-                  <Button 
-                    size="sm" 
-                    variant="ghost" 
-                    className="p-1 h-6 w-6"
-                    onClick={handleSync}
-                    disabled={syncMutation.isPending}
-                    title="Sync Now"
-                  >
-                    <Github className={`h-3 w-3 text-[hsl(var(--obsidian-text))] ${syncMutation.isPending ? 'animate-spin' : ''}`} />
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center min-w-0">
+                {!isJoinRoute && (
+                  <Button size="sm" variant="ghost" className="h-9 w-9 p-1 mr-1" onClick={() => setLocation("/")} aria-label="Back to workspaces">
+                    <ChevronLeft className="h-4 w-4" />
                   </Button>
                 )}
-                {!isJoinRoute && <Button 
-                  size="sm" 
-                  variant="ghost" 
-                  className="p-1 h-6 w-6"
-                  onClick={async () => {
-                    try {
-                      let s = collabSession;
-                      s = await startOwnerCollaboration(vaultYdoc, vaultAwareness, () => {
-                        const metaMap = vaultYdoc.getMap("meta");
-                        metaMap.set("peerCount", (s?.peerCount() || 0) + 1);
-                      });
-                      const session = s;
-                      setCollabSession(session);
-                      setShowCollabDialog(true);
-                    } catch (e: any) {
-                      toast({ title: "Failed to start sharing", description: e.message, variant: "destructive" });
-                    }
-                  }}
-                  title="Share Full Cabinet (P2P)"
-                >
-                  <Share2 className="h-3 w-3 text-[hsl(var(--obsidian-text))]" />
-                </Button>}
-                {!isJoinRoute && <Button 
-                  size="sm" 
-                  variant="ghost" 
-                  className="p-1 h-6 w-6"
-                  onClick={() => setShowSettings(true)}
-                >
-                  <Settings className="h-3 w-3 text-[hsl(var(--obsidian-text))]" />
-                </Button>}
+                <h1 className="font-semibold truncate">{cabinetName}</h1>
+                {dirty && <span className="ml-2 h-2 w-2 rounded-full bg-amber-400" title="Unsynced changes" />}
               </div>
-            </div>
-            
-            {/* Replaced showVaultUrl with Dialog handled below */}
-
-            </div>
-
-          {/* File Explorer */}
-          <div className="flex-1 overflow-y-auto">
-            <div className="p-4">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-medium text-[hsl(var(--primary))]">Files</h3>
+              <div className="flex items-center">
                 {!isJoinRoute && (
-                  <div className="flex items-center gap-1" style={{ pointerEvents: 'auto' }}>
-                    <input
-                      type="file"
-                      accept=".pdf,.png,.jpg,.jpeg,.gif,.svg,.md,.txt"
-                      onChange={handleFileUpload}
-                      className="hidden"
-                      id="file-upload"
-                      multiple
-                      onDragOver={e => e.stopPropagation()}
-                      onDrop={e => e.stopPropagation()}
-                    />
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="p-1 h-6 w-6"
-                      onClick={() => document.getElementById('file-upload')?.click()}
-                      title="Upload file"
-                      onDragOver={e => e.stopPropagation()}
-                      onDrop={e => e.stopPropagation()}
-                    >
-                      <Upload className="h-3 w-3 text-gray-400" />
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="p-1 h-6 w-6"
-                      onClick={() => handleNewFile("/")}
-                      title="New File"
-                    >
-                      <Plus className="h-3 w-3 text-gray-400" />
-                    </Button>
-                  </div>
+                  <Button size="sm" variant="ghost" className="h-9 w-9 p-1" onClick={requestSync} disabled={syncing || loadingCabinet} title="Review staged changes" aria-label="Review changes">
+                    {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Github className="h-4 w-4" />}
+                  </Button>
+                )}
+                {!isJoinRoute && (
+                  <Button size="sm" variant="ghost" className="h-9 w-9 p-1" onClick={() => void startSharing()} disabled={!authenticated || showShareProgress} title={collabSession ? "Session details" : "Start sharing session"} aria-label={collabSession ? "Open sharing session details" : "Start sharing session"}>
+                    <Share2 className="h-4 w-4" />
+                  </Button>
+                )}
+                {!isJoinRoute && (
+                  <Button size="sm" variant="ghost" className="h-9 w-9 p-1" onClick={() => setShowSettings(true)} aria-label="Workspace settings">
+                    <Settings className="h-4 w-4" />
+                  </Button>
                 )}
               </div>
-              <FileExplorer 
-                notes={notes} 
-                activeNoteId={activeNoteId}
-                activeNote={activeNote}
-                onNoteSelect={handleNoteSelect}
-                onCreateNote={(path: string = "/", filename?: string) => {
-                  if (filename) {
-                    let finalName = filename.trim();
-                    if (!finalName.includes('.')) finalName += '.md';
-                    createNoteMutation.mutate({ filename: finalName, path });
-                    setCreatingFile(false);
-                  } else {
-                    setCreatingFile(true);
-                    setNewFileName("");
-                    setNewFilePath(path);
-                  }
-                }}
-                onMoveNote={handleMoveNote}
-                creatingFile={creatingFile}
-                newFileName={newFileName}
-                setNewFileName={setNewFileName}
-                handleNewFileSubmit={handleNewFileSubmit}
-                handleNewFileCancel={handleNewFileCancel}
-                onCreateFolder={(parentPath: string, folderName: string) => {
-                  let path = parentPath;
-                  if (!path.endsWith('/')) path += '/';
-                  path += folderName;
-                  createFolderMutation.mutate(path);
-                }}
-                onMoveFolder={(sourcePath: string, destPath: string) => {
-                  if (isMovingFolder) return;
-                  moveFolderMutation.mutate({ oldPath: sourcePath, newPath: destPath });
-                }}
-                onDeleteFolder={(path: string) => {
-                  if (confirm(`Are you sure you want to delete the folder "${path}" and all its contents?`)) {
-                    deleteFolderMutation.mutate(path);
-                  }
-                }}
-                vaultSlug={slug}
-                onRenameNote={handleRenameNote}
-                onDeleteNote={handleDeleteNote}
-                onDuplicateNote={handleDuplicateNote}
-                isMovingFolder={isMovingFolder}
-                isCreatingFolder={isCreatingFolder}
-                readOnly={isJoinRoute}
-              />
             </div>
+            {workingBranch && <p className="text-xs text-muted-foreground mt-2 truncate">{privateRepo?.repoFullName} · {workingBranch}</p>}
+            {isJoinRoute && <p className="text-xs text-muted-foreground mt-2">{joinStatus}</p>}
           </div>
 
-          {/* GitHub Integration Panel */}
-          {!isJoinRoute && vault?.githubRepo && (
-            <div className="p-4 border-t border-[hsl(var(--obsidian-border))]">
-              <div className="bg-[hsl(var(--obsidian-panel))] p-3 rounded-lg">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-medium text-[hsl(var(--obsidian-text))]">GitHub Sync</span>
-                  <Github className="h-4 w-4 text-[hsl(var(--obsidian-text))]" />
-                </div>
-                <div className="text-xs text-[hsl(var(--obsidian-text-muted))] mb-2">{vault.githubRepo}</div>
-              {vault?.lastSyncAt && (
-                <div className="text-xs text-[hsl(var(--obsidian-text-muted))] mb-3">
-                  Last synced: {new Date(vault.lastSyncAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          <div className="flex-1 overflow-y-auto p-4">
+            <div className="flex items-center justify-between gap-2 mb-3">
+              {!isJoinRoute ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="sm" className="h-7 px-2 text-sm text-[hsl(var(--primary))]" disabled={loadingCabinet || syncing}>
+                      Folders ({selectedScopes.length}) <ChevronDown className="h-3 w-3 ml-1" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="min-w-56 bg-[hsl(var(--obsidian-panel))] border-[hsl(var(--obsidian-border))] text-[hsl(var(--obsidian-text))] shadow-xl">
+                    <DropdownMenuLabel>Principal folders</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    {availableScopes.map((scope) => (
+                      <DropdownMenuCheckboxItem
+                        key={scope.key}
+                        checked={selectedScopes.includes(scope.key)}
+                        onCheckedChange={(checked) => void toggleScope(scope, checked === true)}
+                        onSelect={(event) => event.preventDefault()}
+                      >
+                        {scope.label}
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : (
+                <span className="text-sm font-medium text-[hsl(var(--primary))]">Shared files</span>
+              )}
+              {!structuralReadOnly && selectedScopes.length > 0 && (
+                <div className="hidden items-center gap-1 sm:flex">
+                  <input ref={importInputRef} type="file" accept=".md,text/markdown" multiple className="hidden" onChange={(event) => void handleImport(event)} />
+                  <label htmlFor="creation-folder" className="sr-only">Destination folder</label>
+                  <select
+                    id="creation-folder"
+                    aria-label="Destination folder"
+                    value={effectiveCreationPath}
+                    onChange={(event) => setCreationPath(event.target.value)}
+                    className="h-7 max-w-28 rounded border border-[hsl(var(--obsidian-border))] bg-[hsl(var(--obsidian-bg))] px-1 text-xs text-[hsl(var(--obsidian-text-muted))]"
+                    title="Destination for new and imported Markdown"
+                  >
+                    {creationFolders.map((path) => (
+                      <option key={path} value={path}>{path === "/" ? "Main path" : path.replace(/\/$/, "")}</option>
+                    ))}
+                  </select>
+                  <Button size="sm" variant="ghost" className="h-9 w-9 p-1" onClick={() => importInputRef.current?.click()} title={`Import Markdown into ${effectiveCreationPath}`} aria-label={`Import Markdown into ${effectiveCreationPath}`}>
+                    <Upload className="h-4 w-4" />
+                  </Button>
+                  <Button size="sm" variant="ghost" className="h-9 w-9 p-1" onClick={() => handleCreateNote(effectiveCreationPath)} title={`New Markdown in ${effectiveCreationPath}`} aria-label={`Create Markdown in ${effectiveCreationPath}`}>
+                    <Plus className="h-4 w-4" />
+                  </Button>
                 </div>
               )}
-                <div className="flex items-center justify-end text-xs">
-                  <Button
-                    size="sm" 
-                    variant="ghost" 
-                    className="text-accent hover:text-accent/80 h-auto p-0"
-                    onClick={handleSync}
-                    disabled={syncMutation.isPending}
-                  >
-                    {syncMutation.isPending ? "Syncing..." : "Sync Now"}
-                  </Button>
-                </div>
-              </div>
             </div>
-          )}
-        </div>
+
+            {loadingCabinet ? (
+              <div className="py-10 flex flex-col items-center justify-center gap-2 text-sm text-muted-foreground"><span className="flex items-center"><Loader2 className="h-4 w-4 animate-spin mr-2" />Loading {loadProgress?.scope || "selected folders"}</span>{loadProgress && loadProgress.total > 0 && <span className="text-xs">{loadProgress.completed} of {loadProgress.total} Markdown files</span>}<Button size="sm" variant="ghost" onClick={() => loadAbortRef.current?.abort()}>Cancel</Button></div>
+            ) : selectedScopes.length === 0 && !isJoinRoute ? (
+              <div className="rounded-md border border-dashed border-[hsl(var(--obsidian-border))] p-4 text-sm text-muted-foreground">
+                <FileText className="h-6 w-6 mb-2 opacity-60" />
+                No <code>.agents</code> folder was selected. Open Folders to choose Main path or another principal folder.
+              </div>
+            ) : (
+              <FileExplorer
+                notes={notes}
+                emptyFolders={emptyFolders}
+                activeNoteId={activeNoteId}
+                activeNote={activeNote}
+                onNoteSelect={selectNote}
+                onCreateNote={(path = defaultCreationPath, filename) => handleCreateNote(path, filename)}
+                onMoveNote={(id, path) => {
+                  try {
+                    const moving = notes.find((candidate) => candidate.id === id);
+                    const destination = moving ? `${normalizeDirectoryPath(path) === "/" ? "" : normalizeDirectoryPath(path)}${moving.filename}` : "";
+                    if (!moving || !selectedScopes.some((scope) => pathBelongsToScope(destination, scope))) throw new Error("Move Markdown only within selected workspace scopes.");
+                    moveNote(vaultYdoc, id, path);
+                    recordActivity("moved Markdown", id, destination);
+                  }
+                  catch (error) { toast({ title: "Could not move Markdown", description: repositoryErrorMessage(error), variant: "destructive" }); }
+                }}
+                creatingFile={creatingFile}
+                newFileName={newFileName}
+                newFilePath={newFilePath}
+                setNewFileName={setNewFileName}
+                handleNewFileCancel={() => { setCreatingFile(false); setNewFileName(""); }}
+                onCreateFolder={handleCreateFolder}
+                onMoveFolder={requestMoveFolder}
+                onDeleteFolder={(path) => setPendingDelete({ kind: "folder", path, label: path, count: folderMarkdownCount(vaultYdoc, path) })}
+                onRenameNote={(id, name) => {
+                  try { renameNote(vaultYdoc, id, name); recordActivity("renamed Markdown", id, name); }
+                  catch (error) { toast({ title: "Could not rename Markdown", description: repositoryErrorMessage(error), variant: "destructive" }); }
+                }}
+                onDeleteNote={(id) => {
+                  const note = notes.find((candidate) => candidate.id === id);
+                  if (note) setPendingDelete({ kind: "file", id, label: fullNotePath(note), count: 1 });
+                }}
+                onDuplicateNote={(note) => {
+                  const base = note.filename.replace(/\.md$/i, "");
+                  const existing = new Set(
+                    notes
+                      .filter((candidate) => candidate.path === note.path)
+                      .map((candidate) => candidate.filename.toLowerCase()),
+                  );
+                  let suffix = "-copy";
+                  let counter = 2;
+                  while (existing.has(`${base}${suffix}.md`.toLowerCase())) {
+                    suffix = `-copy-${counter}`;
+                    counter += 1;
+                  }
+                  handleCreateNote(note.path, `${base}${suffix}.md`, note.content);
+                }}
+                isMovingFolder={false}
+                isCreatingFolder={false}
+                readOnly={structuralReadOnly}
+              />
+            )}
+          </div>
+        </aside>
       )}
 
-      {/* Expand button when sidebar is collapsed */}
-      {sidebarCollapsed && (
-        <button
-          className="absolute left-0 top-1/2 z-50 -translate-y-1/2 bg-[hsl(var(--obsidian-sidebar))] border border-[hsl(var(--obsidian-border))] rounded-r px-1 py-2 shadow hover:bg-[hsl(var(--obsidian-panel))] transition-colors"
-          style={{ width: 24 }}
-          onClick={() => {
-            setSidebarCollapsed(false);
-            setSidebarWidth(lastSidebarWidth);
-          }}
-          title="Expand sidebar"
-        >
-          <ChevronRight className="h-4 w-4 text-[hsl(var(--obsidian-text))]" />
-        </button>
-      )}
-
-      {/* Resizer */}
-      {!sidebarCollapsed && (
-        <div 
-          className="resizer"
-          onMouseDown={(e) => {
-            e.preventDefault();
-            const startX = e.clientX;
-            const startWidth = sidebarWidth;
-
-            const handleMouseMove = (e: MouseEvent) => {
-              let newWidth = Math.max(40, Math.min(600, startWidth + (e.clientX - startX)));
-              if (newWidth <= 120) {
-                setSidebarCollapsed(true);
-                setLastSidebarWidth(startWidth > 120 ? startWidth : 320);
-                document.removeEventListener("mousemove", handleMouseMove);
-                document.removeEventListener("mouseup", handleMouseUp);
-                return;
-              }
-              setSidebarWidth(newWidth);
-            };
-
-            const handleMouseUp = () => {
-              document.removeEventListener("mousemove", handleMouseMove);
-              document.removeEventListener("mouseup", handleMouseUp);
-            };
-
-            document.addEventListener("mousemove", handleMouseMove);
-            document.addEventListener("mouseup", handleMouseUp);
-          }}
-          onDoubleClick={() => {
-            setSidebarCollapsed(true);
-            setLastSidebarWidth(sidebarWidth > 120 ? sidebarWidth : 320);
-          }}
-        />
-      )}
-
-      {/* Editor Area: Single Tab Bar and Editor */}
-      <div className="flex-1 flex flex-col">
-        {/* Tab Bar */}
-        <div className="h-12 bg-[hsl(var(--obsidian-sidebar))] border-b border-[hsl(var(--obsidian-border))] flex items-center px-2">
-          {/* Tabs */}
+      <main className={`${mobilePanel === "document" ? "flex" : "hidden"} flex-1 flex-col min-w-0 sm:flex`}>
+        <div className="h-12 bg-[hsl(var(--obsidian-sidebar))] border-b border-[hsl(var(--obsidian-border))] flex items-center">
+          {sidebarCollapsed && <Button variant="ghost" size="sm" className="mx-1 hidden sm:inline-flex" onClick={() => setSidebarCollapsed(false)}>Files</Button>}
+          {!sidebarCollapsed && <Button variant="ghost" size="sm" className="mx-1 hidden text-xs sm:inline-flex" onClick={() => setSidebarCollapsed(true)}>Hide</Button>}
           <div className="flex-1 flex items-center overflow-x-auto">
-            {openTabs.map(tabId => {
-              const note = notes.find(n => n.id === tabId);
+            {openTabs.map((id) => {
+              const note = notes.find((candidate) => candidate.id === id);
               if (!note) return null;
               return (
-                <div
-                  key={tabId}
-                  className={`flex items-center px-4 py-1 mr-2 rounded-t cursor-pointer transition-colors ${tabId === activeTabId ? 'bg-[hsl(var(--obsidian-panel))] border-b-2 border-accent' : 'hover:bg-[hsl(var(--obsidian-panel))]'}`}
-                  onClick={() => { setActiveTabId(tabId); setActiveNoteId(tabId); }}
-                >
-                  <FileText className="h-3 w-3 text-[hsl(var(--obsidian-text))] mr-2" />
-                  <span className="text-sm text-[hsl(var(--obsidian-text))] mr-2">{note.filename}</span>
-                  <button
-                    className="ml-1 text-[hsl(var(--obsidian-text-muted))] hover:text-red-400"
-                    onClick={e => { e.stopPropagation(); handleTabClose(tabId); }}
-                    title="Close tab"
-                  >
-                    ×
-                  </button>
+                <div key={id} className={`flex items-center px-3 py-2 mr-1 cursor-pointer ${activeTabId === id ? "bg-[hsl(var(--obsidian-panel))] border-b-2 border-accent" : ""}`} onClick={() => { setActiveTabId(id); setActiveNoteId(id); }}>
+                  <FileText className="h-3 w-3 mr-2" /><span className="text-sm mr-2">{note.filename}</span>
+                  <button onClick={(event) => { event.stopPropagation(); closeTab(id); }} aria-label={`Close ${note.filename}`}>×</button>
                 </div>
               );
             })}
           </div>
-
-          {/* Collaboration Status */}
-          <div className="flex items-center gap-4 px-4 border-l border-[hsl(var(--obsidian-border))]">
-            {/* Identity and Avatar */}
-            <div className="flex items-center gap-2">
-              <CollaborationIndicator 
-                awareness={vaultAwareness} 
-                myName={myUsername} 
-                onNameChange={handleUsernameChange} 
-              />
-            </div>
-
-            {/* Chat Button */}
-            <button
-              onClick={() => setShowChat(!showChat)}
-              aria-label={hasUnread ? "Open chat, unread messages" : "Open chat"}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors ${
-                hasUnread 
-                  ? 'bg-[hsl(var(--obsidian-accent))] text-white hover:brightness-110 ring-1 ring-[hsl(var(--obsidian-accent))]' 
-                  : 'bg-[hsl(var(--obsidian-panel))] hover:bg-[hsl(var(--obsidian-panel-hover))] text-[hsl(var(--obsidian-text-muted))] hover:text-[hsl(var(--obsidian-text))]'
-              }`}
-            >
-              <MessageSquare className="h-4 w-4" />
-              <span className="text-xs">Chat</span>
-            </button>
+          <div className="flex items-center gap-2 px-3 border-l border-[hsl(var(--obsidian-border))]">
+            <CollaborationIndicator awareness={vaultAwareness} myName={myUsername} onNameChange={setMyUsername} />
+            <Button variant="ghost" size="sm" className={hasUnread ? "bg-[hsl(var(--obsidian-accent))] text-white" : ""} onClick={() => setShowChat((open) => !open)} aria-label="Toggle discussion">
+              <MessageSquare className="h-4 w-4 mr-1" />Discussion
+            </Button>
           </div>
         </div>
-        {/* Editor Content */}
-        <div className="flex-1 flex flex-col min-h-0 relative">
-          {activeTabId ? (
-            (() => {
-              const note = notes.find(n => n.id === activeTabId);
-              const splitNote = splitViewNoteId ? notes.find(n => n.id === splitViewNoteId) : null;
-              
-              return note ? (
-                <div className="h-full flex flex-row w-full overflow-hidden">
-                  {/* Primary Editor */}
-                  <div className={`h-full flex flex-col relative ${splitNote ? 'w-1/2 border-r border-[hsl(var(--obsidian-border))]' : 'w-full'}`}>
-                      <SimpleCollaborativeEditor
-                        note={note}
-                        vaultId={vault?.id || 0}
-                        mode={editorMode}
-                        vaultSlug={isJoinRoute ? "shared-session" : slug}
-                        readOnly={isJoinRoute ? invite?.role !== "edit" : !authenticated}
-                        ytext={vaultYdoc.getMap<Y.Map<any>>('files').get(String(note.id))?.get('content') as Y.Text | undefined}
-                        awareness={vaultAwareness}
-                        onContentChange={(newContent) => {
-                        if (!isJoinRoute) {
-                          updateNoteMutation.mutate({ id: note.id, content: newContent });
-                        }
-                      }}
-                      onModeChange={setEditorMode}
-                      onSplitView={() => toggleSplitView(note.id)}
-                    />
-                  </div>
-                  
-                  {/* Split View Editor */}
-                  {splitNote && (
-                    <div className="h-full w-1/2 flex flex-col relative">
-                      <SimpleCollaborativeEditor
-                        note={splitNote}
-                        vaultId={vault?.id || 0}
-                        mode={editorMode}
-                        vaultSlug={isJoinRoute ? "shared-session" : slug}
-                        readOnly={isJoinRoute ? invite?.role !== "edit" : !authenticated}
-                        isSplitPane={true}
-                        ytext={vaultYdoc.getMap<Y.Map<any>>('files').get(String(splitNote.id))?.get('content') as Y.Text | undefined}
-                        awareness={vaultAwareness}
-                        onContentChange={(newContent) => {
-                          if (!isJoinRoute) {
-                            updateNoteMutation.mutate({ id: splitNote.id, content: newContent });
-                          }
-                        }}
-                        onModeChange={setEditorMode}
-                        onSplitView={() => toggleSplitView(splitNote.id)}
-                      />
-                    </div>
-                  )}
-                </div>
-              ) : null;
-            })()
-          ) : (
-            <div className="h-full flex items-center justify-center text-[hsl(var(--obsidian-text-muted))]">
-              <div className="text-center">
-                <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                <p>Select a note to start editing</p>
-                <p className="text-sm mt-2">or create a new one using the + button</p>
+
+        <div className="flex-1 min-h-0">
+          {activeTabId ? (() => {
+            const note = notes.find((candidate) => candidate.id === activeTabId);
+            const splitNote = splitViewNoteId ? notes.find((candidate) => candidate.id === splitViewNoteId) : undefined;
+            if (!note) return null;
+            const renderEditor = (editorNote: Note, split = false) => (
+              <SimpleCollaborativeEditor
+                note={editorNote}
+                mode={editorMode}
+                readOnly={structuralReadOnly}
+                isSplitPane={split}
+                ytext={getFilesMap(vaultYdoc).get(editorNote.id)?.get("content") as Y.Text | undefined}
+                awareness={vaultAwareness}
+                onContentChange={() => { if (!structuralReadOnly) markNoteModified(vaultYdoc, editorNote.id); }}
+                onModeChange={setEditorMode}
+                onSplitView={() => setSplitViewNoteId((current) => current === editorNote.id ? null : editorNote.id)}
+              />
+            );
+            return (
+              <div className="h-full flex">
+                <div className={splitNote ? "w-1/2 border-r border-[hsl(var(--obsidian-border))]" : "w-full"}>{renderEditor(note)}</div>
+                {splitNote && <div className="w-1/2">{renderEditor(splitNote, true)}</div>}
               </div>
+            );
+          })() : (
+            <div className="h-full flex items-center justify-center text-muted-foreground text-center">
+              <div><FileText className="h-12 w-12 mx-auto mb-3 opacity-40" /><p>Select a Markdown file to begin.</p></div>
             </div>
           )}
         </div>
-      </div>
+      </main>
 
-      {/* Settings Dialog */}
-      {vault && (
-        <CabinetSettingsDialog
-          open={showSettings}
-          onOpenChange={setShowSettings}
-          vault={vault}
-        />
-      )}
-      {/* Chat Panel */}
+      <nav className="fixed inset-x-0 bottom-0 z-30 grid h-14 grid-cols-4 border-t border-[hsl(var(--obsidian-border))] bg-[hsl(var(--obsidian-sidebar))] sm:hidden" aria-label="Workspace panels">
+        <button type="button" className={`flex flex-col items-center justify-center text-xs ${mobilePanel === "files" && !showChat ? "text-[hsl(var(--obsidian-accent))]" : "text-muted-foreground"}`} onClick={() => { setSidebarCollapsed(false); setMobilePanel("files"); setShowChat(false); }}><FolderOpen className="h-4 w-4" />Files</button>
+        <button type="button" className={`flex flex-col items-center justify-center text-xs ${mobilePanel === "document" && !showChat ? "text-[hsl(var(--obsidian-accent))]" : "text-muted-foreground"}`} onClick={() => { setMobilePanel("document"); setShowChat(false); }}><FileText className="h-4 w-4" />Document</button>
+        <button type="button" className={`flex flex-col items-center justify-center text-xs ${showChat ? "text-[hsl(var(--obsidian-accent))]" : "text-muted-foreground"}`} onClick={() => setShowChat(true)}><MessageSquare className="h-4 w-4" />Discussion</button>
+        <button type="button" className="flex flex-col items-center justify-center text-xs text-muted-foreground" onClick={requestSync}><ListChecks className="h-4 w-4" />Changes{workspaceChanges.length > 0 && <span className="sr-only"> ({workspaceChanges.length})</span>}</button>
+      </nav>
+
       <ChatPanel
         open={showChat}
         onOpenChange={setShowChat}
         width={chatWidth}
         onWidthChange={setChatWidth}
-        ydoc={vaultYdoc}
+        messages={chatMessages}
+        onSend={sendChatMessage}
         username={myUsername}
         userColor={myColor}
         clientId={chatClientId}
+        anchor={activeNote ? { fileId: activeNote.id, filePath: fullNotePath(activeNote) } : undefined}
+        onCaptureDecision={structuralReadOnly ? undefined : openDecisionCapture}
       />
-      
+
+      {vault && <CabinetSettingsDialog open={showSettings} onOpenChange={setShowSettings} vault={vault} />}
+
+      <ConfirmDialog
+        open={Boolean(pendingDelete)}
+        onOpenChange={(open) => { if (!open) setPendingDelete(null); }}
+        title={pendingDelete?.kind === "folder" ? "Delete Markdown folder contents?" : "Delete Markdown file?"}
+        description={pendingDelete?.kind === "folder"
+          ? `This stages deletion of ${pendingDelete.count} visible Markdown file${pendingDelete.count === 1 ? "" : "s"} under '${pendingDelete.label}'. Unmanaged repository files are untouched.`
+          : `This stages deletion of '${pendingDelete?.label}'. GitHub is not changed until the owner syncs.`}
+        confirmText="Stage deletion"
+        onConfirm={() => {
+          if (!pendingDelete) return;
+          if (pendingDelete.kind === "file") { deleteNote(vaultYdoc, pendingDelete.id); recordActivity("deleted Markdown", pendingDelete.id, pendingDelete.label); }
+          else { deleteFolder(vaultYdoc, pendingDelete.path); recordActivity("deleted folder contents", undefined, pendingDelete.path); }
+          setPendingDelete(null);
+        }}
+      />
+
+      <ConfirmDialog
+        open={Boolean(pendingMove)}
+        onOpenChange={(open) => { if (!open) setPendingMove(null); }}
+        title="Move Markdown folder contents?"
+        description={`This stages moving ${pendingMove?.count || 0} visible Markdown file${pendingMove?.count === 1 ? "" : "s"} from '${pendingMove?.sourcePath || ""}' to '${pendingMove?.targetPath || ""}'. Unmanaged repository files are untouched.`}
+        confirmText="Stage move"
+        onConfirm={() => {
+          if (!pendingMove) return;
+          handleMoveFolder(pendingMove.sourcePath, pendingMove.targetPath.split("/").slice(0, -1).join("/") || "/");
+          setPendingMove(null);
+        }}
+      />
+
       <Dialog open={showCollabDialog} onOpenChange={setShowCollabDialog}>
-        <DialogContent className="bg-[hsl(var(--obsidian-panel))] border-[hsl(var(--obsidian-border))] text-[hsl(var(--obsidian-text))] sm:max-w-md">
+        <DialogContent className="sm:max-w-md bg-[hsl(var(--obsidian-sidebar))] border-[hsl(var(--obsidian-border))]">
           <DialogHeader>
-            <DialogTitle>Share Cabinet P2P</DialogTitle>
-            <DialogDescription className="text-[hsl(var(--obsidian-text-muted))]">
-              Share this ephemeral link with collaborators. The connection is direct WebRTC and zero content passes through any server.
-            </DialogDescription>
+            <DialogTitle>Private collaboration session</DialogTitle>
+            <DialogDescription>Encrypted peer-to-peer links share the live workspace in memory. Closing or stopping the owner session can end access; only the owner can publish to GitHub.</DialogDescription>
           </DialogHeader>
-          <div className="flex flex-col gap-4 py-4">
-            <div className="space-y-2">
-              <Label>Edit Link</Label>
-              <div className="flex gap-2">
-                <Input readOnly value={collabSession?.editLink || ""} className="bg-[hsl(var(--obsidian-bg))] border-[hsl(var(--obsidian-border))]" />
-                <Button variant="outline" size="icon" onClick={() => {
-                  navigator.clipboard.writeText(collabSession?.editLink || "");
-                  toast({ title: "Copied!" });
-                }}>
-                  <Copy className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label>View Only Link</Label>
-              <div className="flex gap-2">
-                <Input readOnly value={collabSession?.viewLink || ""} className="bg-[hsl(var(--obsidian-bg))] border-[hsl(var(--obsidian-border))]" />
-                <Button variant="outline" size="icon" onClick={() => {
-                  navigator.clipboard.writeText(collabSession?.viewLink || "");
-                  toast({ title: "Copied!" });
-                }}>
-                  <Copy className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
+          <div className="rounded-md border border-[hsl(var(--obsidian-border))] bg-[hsl(var(--obsidian-panel))] p-3 text-sm">
+            <div className="flex items-center justify-between"><span className="font-medium capitalize">{sessionState}</span><span>{peerCount} connected {peerCount === 1 ? "person" : "people"}</span></div>
+            <p className="mt-2 text-xs text-muted-foreground">Shared scopes: {selectedScopes.map((scope) => scope === "/" ? "Main path" : scope).join(", ") || "None"}</p>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowCollabDialog(false)}>Close</Button>
+          {[{ label: "Edit link", value: collabSession?.editLink || "" }, { label: "View-only link", value: collabSession?.viewLink || "" }].map((link) => (
+            <div key={link.label} className="space-y-2">
+              <Label htmlFor={`share-${link.label.replace(/\W/g, "-")}`}>{link.label}</Label>
+              <div className="flex gap-2"><Input id={`share-${link.label.replace(/\W/g, "-")}`} readOnly value={link.value} /><Button size="icon" variant="outline" aria-label={`Copy ${link.label.toLowerCase()}`} onClick={() => { void navigator.clipboard.writeText(link.value); toast({ title: `${link.label} copied` }); }}><Copy className="h-4 w-4" /></Button></div>
+            </div>
+          ))}
+          <DialogFooter className="gap-2 sm:justify-between">
+            <Button variant="destructive" onClick={stopSharing}>Stop session</Button>
+            <Button variant="outline" onClick={() => void startSharing(true)}><RotateCw className="mr-2 h-4 w-4" />Rotate links</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={showChanges} onOpenChange={(open) => { if (!syncing) setShowChanges(open); }}>
+        <DialogContent className="max-h-[90vh] overflow-hidden sm:max-w-2xl bg-[hsl(var(--obsidian-sidebar))] border-[hsl(var(--obsidian-border))] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Review changes before publishing</DialogTitle>
+            <DialogDescription>{workspaceChanges.length} staged operation{workspaceChanges.length === 1 ? "" : "s"}. Collaborators can keep editing until you start Sync; Sync briefly locks the shared workspace.</DialogDescription>
+          </DialogHeader>
+          <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+            {workspaceChanges.map((change) => (
+              <div key={change.id} className="rounded-md border border-[hsl(var(--obsidian-border))] bg-[hsl(var(--obsidian-panel))] p-3">
+                <div className="flex items-start gap-3">
+                  <span className={`mt-0.5 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${change.kind === "deleted" ? "bg-red-900/60 text-red-200" : change.kind === "added" ? "bg-emerald-900/60 text-emerald-200" : "bg-amber-900/60 text-amber-100"}`}>{change.kind}</span>
+                  <div className="min-w-0 flex-1"><p className="break-all text-sm font-medium">{change.path}</p>{change.originalPath && change.originalPath !== change.path && <p className="break-all text-xs text-muted-foreground">from {change.originalPath}</p>}{(() => { const activity = [...workspaceActivities].reverse().find((candidate) => candidate.fileId === change.fileId || candidate.path === change.path || candidate.path?.includes(change.path)); return activity ? <p className="mt-1 text-xs text-muted-foreground">{activity.actor.displayName} · {activity.operation} · {new Date(activity.timestamp).toLocaleTimeString()}</p> : null; })()}</div>
+                  <Button size="sm" variant="ghost" onClick={() => discardOneChange(change)} aria-label={`Discard change to ${change.path}`}><Undo2 className="mr-1 h-3 w-3" />Undo</Button>
+                </div>
+                {(change.contentBefore !== undefined || change.contentAfter !== undefined) && (
+                  <details className="mt-2 text-xs"><summary className="cursor-pointer text-muted-foreground">Inspect content</summary><div className="mt-2 grid gap-2 sm:grid-cols-2"><pre className="max-h-44 overflow-auto whitespace-pre-wrap rounded bg-black/20 p-2">{change.contentBefore ?? "(new file)"}</pre><pre className="max-h-44 overflow-auto whitespace-pre-wrap rounded bg-black/20 p-2">{change.contentAfter ?? "(deleted)"}</pre></div></details>
+                )}
+              </div>
+            ))}
+          </div>
+          <div className="space-y-2 border-t border-[hsl(var(--obsidian-border))] pt-3">
+            <Label htmlFor="commit-message">Commit message</Label>
+            <Input id="commit-message" value={commitMessage} onChange={(event) => setCommitMessage(event.target.value)} maxLength={120} />
+          </div>
+          <DialogFooter className="gap-2 sm:justify-between">
+            <Button variant="outline" onClick={() => setConfirmDiscardAll(true)} disabled={syncing}>Discard all</Button>
+            <Button onClick={() => void handleSync()} disabled={syncing || workspaceChanges.length === 0}>{syncing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Sync {workspaceChanges.length} change{workspaceChanges.length === 1 ? "" : "s"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <ConfirmDialog
+        open={confirmDiscardAll}
+        onOpenChange={setConfirmDiscardAll}
+        title="Discard all staged work?"
+        description={`Restore all ${workspaceChanges.length} staged operation${workspaceChanges.length === 1 ? "" : "s"} to the GitHub version loaded when this workspace opened. This cannot be undone.`}
+        confirmText="Discard all"
+        onConfirm={() => {
+          discardWorkspaceChanges(vaultYdoc, baselineRef.current);
+          setConfirmDiscardAll(false);
+          setShowChanges(false);
+        }}
+      />
+
+      <Dialog open={Boolean(decisionMessage)} onOpenChange={(open) => { if (!open) setDecisionMessage(null); }}>
+        <DialogContent className="sm:max-w-lg bg-[hsl(var(--obsidian-sidebar))] border-[hsl(var(--obsidian-border))]">
+          <DialogHeader><DialogTitle>Capture decision</DialogTitle><DialogDescription>Turn an ephemeral discussion message into a reviewed Markdown change.</DialogDescription></DialogHeader>
+          <div className="space-y-2"><Label htmlFor="decision-summary">Decision</Label><textarea id="decision-summary" value={decisionText} onChange={(event) => setDecisionText(event.target.value)} className="min-h-28 w-full rounded-md border border-[hsl(var(--obsidian-border))] bg-[hsl(var(--obsidian-panel))] p-3 text-sm" /></div>
+          <div className="space-y-2"><Label htmlFor="decision-target">Workspace document</Label><select id="decision-target" value={decisionTargetId} onChange={(event) => setDecisionTargetId(event.target.value)} className="h-10 w-full rounded-md border border-[hsl(var(--obsidian-border))] bg-[hsl(var(--obsidian-panel))] px-3 text-sm">{notes.map((note) => <option key={note.id} value={note.id}>{fullNotePath(note)}</option>)}</select></div>
+          <DialogFooter><Button variant="outline" onClick={() => setDecisionMessage(null)}>Cancel</Button><Button onClick={captureDecision} disabled={!decisionText.trim() || !decisionTargetId}>Stage decision</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={missingRepository} onOpenChange={(open) => { if (!open) setLocation("/"); }}>
+        <DialogContent className="sm:max-w-md bg-[hsl(var(--obsidian-sidebar))] border-[hsl(var(--obsidian-border))]">
+          <DialogHeader>
+            <DialogTitle>Repository not found or inaccessible</DialogTitle>
+            <DialogDescription>
+              GitHub could not access <code>{privateRepo?.repoFullName}</code> with this token. You can return to your cabinets or create a private repository under {creationLogin || "the authenticated GitHub account"}; Marktwin will initialize <code>.agents/README.md</code>.
+            </DialogDescription>
+          </DialogHeader>
+          {loadError && <p className="text-sm text-red-400">{loadError}</p>}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setLocation("/")}>Cancel</Button>
+            <Button onClick={() => void createMissingRepository()} disabled={creatingRepository}>
+              {creatingRepository && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}Create private repository
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(branchIssue)} onOpenChange={(open) => { if (!open) setLocation("/"); }}>
+        <DialogContent className="sm:max-w-md bg-[hsl(var(--obsidian-sidebar))] border-[hsl(var(--obsidian-border))]">
+          <DialogHeader>
+            <DialogTitle>Branch not found</DialogTitle>
+            <DialogDescription>The saved branch <code>{branchIssue?.requested}</code> does not exist. GitHub reports <code>{branchIssue?.fallback}</code> as the repository default.</DialogDescription>
+          </DialogHeader>
+          <DialogFooter><Button variant="outline" onClick={() => setLocation("/")}>Cancel</Button><Button onClick={() => void useDefaultBranch()}>Use {branchIssue?.fallback}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {loadError && !missingRepository && !branchIssue && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-md bg-red-950 border border-red-700 px-4 py-3 text-sm text-red-100 shadow-lg">
+          <AlertCircle className="h-4 w-4" />{loadError}<Button size="sm" variant="outline" onClick={() => setLocation("/")}>Back</Button>
+        </div>
+      )}
     </div>
   );
 }

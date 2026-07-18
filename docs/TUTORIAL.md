@@ -14,6 +14,11 @@ Depending on the type of token you create, you will need:
 - **Fine-grained Personal Access Token (Recommended):** `Contents` (Read and Write) access to your specific repository.
 - **Classic Personal Access Token:** The full `repo` scope (which grants read/write to all your private and public repos).
 
+If you want Marktwin to create a missing private repository, a fine-grained
+token also needs **Administration: Read and write**. Repository creation with a
+classic token requires the `repo` scope. You can instead create the repository
+yourself and give Marktwin only Contents access.
+
 ---
 
 ## 2️⃣ Step-by-Step: Creating Your Token
@@ -40,16 +45,38 @@ We highly recommend using a **Fine-grained Personal Access Token** because it li
 
 ## 3️⃣ Linking Your Repo in Marktwin
 
-Now that you have your token, you can load your files into Marktwin! There's no
-sign-up or login — Marktwin opens directly to **My Cabinets**.
+Now that you have your token, you can load your workspace into Marktwin. There
+is no Marktwin account — the app opens directly to **Agent workspaces**.
 
-1. Click **New Cabinet**.
+1. Click **Connect repository**.
 2. In the **Repository** field, enter your repo in the `owner/repo` format (for example, if your GitHub username is `nathalia` and your repo is `my-notes`, you would type `nathalia/my-notes`).
 3. In the **Default branch** field, enter the branch you want to read/write from (usually `main`).
-4. Click **New Cabinet** to save it to your list.
-5. Click **Open Cabinet** on the card, paste your token into the **GitHub Token** field, and click **Enter Cabinet**.
+4. Click **Continue**.
+5. Use **Continue with GitHub** when OAuth is configured, or expand the advanced
+   personal-access-token option, paste your PAT, and click **Validate and open**.
 
-Your markdown (`.md`), SVG (`.svg`), and PDF (`.pdf`) files will now appear in the **Files** sidebar, complete with their folder structure!
+Marktwin validates the repository and branch directly with GitHub before
+opening it. If the repository is missing or inaccessible, you can cancel or
+create a private repository under the authenticated personal account. A created
+repository is initialized with `.agents/README.md`.
+
+Only Markdown (`.md`) is managed in the workspace. On first open, Marktwin selects
+`.agents` only. Use **Folders** to add **Main path** for root-level files such as
+`README.md`, or another top-level folder; selecting one includes its Markdown
+subfolders. Folder choices are remembered locally per workspace.
+
+Changes are local and peer-to-peer until the owner opens **Changes**, inspects
+the staged paths and content, optionally undoes/discards work, supplies a commit
+message, and confirms **Sync**. Marktwin then publishes additions, edits, moves,
+renames, deletions, and captured decisions together in one Git commit. If the
+GitHub branch advanced, the commit is preserved on a new `*-marktwin-*` branch
+and the workspace switches to it.
+
+Use **Start sharing session** for fresh edit and view-only links. Both roles can
+join Discussion; only edit peers can change Markdown, and only the owner can
+publish. **Capture decision** turns an ephemeral discussion message into a
+staged Markdown entry. Stop the session when finished or rotate links to revoke
+the previous pair.
 
 ---
 

@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import { useMutation } from "@tanstack/react-query";
 import {
   Dialog,
   DialogContent,
@@ -10,8 +9,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
-import { Switch } from "@/components/ui/switch";
 import {
   User,
   Settings,
@@ -20,25 +17,13 @@ import {
   Wine,
   Milk,
 } from "lucide-react";
-import { apiRequest, queryClient } from "@/lib/queryClient";
-import { useToast } from "@/hooks/use-toast";
 import { useTheme } from "@/contexts/theme-context";
 import type { Vault } from "@shared/schema";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { useFont } from "@/contexts/font-context";
 
 // Appearance Settings Component
 function AppearanceSettings() {
   const { theme, setTheme } = useTheme();
-  const { font, setFont } = useFont();
-  const { toast } = useToast();
 
   // Unified color options for both dark and light themes
   const colorOptions = [
@@ -119,38 +104,6 @@ function AppearanceSettings() {
     localStorage.setItem("lightThemeColorIndex", String(idx));
   };
 
-  const updateFontMutation = useMutation({
-    mutationFn: async (newFont: string) => {
-      const response = await apiRequest("PUT", `/api/user/preferences`, {
-        config: {
-          font: newFont,
-        },
-      });
-      if (!response.ok) {
-        throw new Error("Failed to update font settings");
-      }
-      return response.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/user/preferences"] });
-    },
-    onError: (error) => {
-      if (error instanceof Error && error.message === "Failed to update font settings") {
-        toast({
-          title: "Error",
-          description: "Failed to update font settings. Please try again.",
-          variant: "destructive",
-        });
-      }
-    },
-  });
-
-  const handleFontChange = (value: string) => {
-    if (!value) return;
-    setFont(value as any);
-    updateFontMutation.mutate(value);
-  };
-
   return (
     <Card className="bg-[hsl(var(--obsidian-panel))] border-[hsl(var(--obsidian-border))]">
       <CardHeader>
@@ -160,7 +113,7 @@ function AppearanceSettings() {
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-2 gap-6">
+        <div className="space-y-3">
           {/* Theme Settings */}
           <div className="space-y-3">
             <div className="space-y-2">
@@ -225,31 +178,6 @@ function AppearanceSettings() {
             </div>
           </div>
 
-          {/* Font Settings */}
-          <div className="space-y-3">
-            <div className="space-y-2">
-              <Label className="text-[hsl(var(--obsidian-text))] text-sm font-medium">
-                Font Family
-              </Label>
-              <p className="text-[hsl(var(--obsidian-text-muted))] text-xs">
-                Choose your preferred font
-              </p>
-              <Select value={font} onValueChange={handleFontChange} disabled={updateFontMutation.isPending}>
-                <SelectTrigger className="w-full bg-[hsl(var(--obsidian-bg))] border-[hsl(var(--obsidian-border))] text-[hsl(var(--obsidian-text))]">
-                  <SelectValue placeholder="Select a font" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Inter">Inter – Modern, neutral sans-serif</SelectItem>
-                  <SelectItem value="Merriweather">Merriweather – Classic serif</SelectItem>
-                  <SelectItem value="Poppins">Poppins – Geometric sans-serif</SelectItem>
-                  <SelectItem value="Roboto Slab">Roboto Slab – Slab-serif</SelectItem>
-                </SelectContent>
-              </Select>
-              {updateFontMutation.isPending && (
-                <p className="text-xs text-[hsl(var(--obsidian-text-muted))]">Updating font settings...</p>
-              )}
-            </div>
-          </div>
         </div>
       </CardContent>
     </Card>
@@ -263,18 +191,15 @@ function CabinetInformation({ vault }: { vault: Vault }) {
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-[hsl(var(--obsidian-text))]">
           <User className="h-4 w-4" />
-          Cabinet Information
+          Workspace information
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="flex items-center justify-between">
-          <span className="text-sm text-[hsl(var(--obsidian-text-muted))]">Cabinet Name</span>
+          <span className="text-sm text-[hsl(var(--obsidian-text-muted))]">Workspace name</span>
           <span className="text-sm text-[hsl(var(--obsidian-text))] font-mono">{vault.name}</span>
         </div>
-        <div className="flex items-center justify-between">
-          <span className="text-sm text-[hsl(var(--obsidian-text-muted))]">Cabinet URL</span>
-          <span className="text-sm text-accent font-mono">/cabinet/{vault.urlSlug}</span>
-        </div>
+        <p className="text-xs text-muted-foreground">This workspace is saved only in this browser. Use a live session link—not the browser route—to invite collaborators.</p>
       </CardContent>
     </Card>
   );
@@ -298,7 +223,7 @@ export default function VaultSettingsDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-[hsl(var(--obsidian-text))]">
             <Settings className="h-5 w-5" />
-            Cabinet Settings
+            Workspace settings
           </DialogTitle>
         </DialogHeader>
 

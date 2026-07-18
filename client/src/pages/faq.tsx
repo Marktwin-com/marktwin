@@ -9,12 +9,12 @@ export default function FAQPage() {
     {
       id: "what-is-marktwin",
       question: "What is Marktwin?",
-      answer: "Marktwin is a space for teams who want to build together without compromising their privacy. It gives you the fluid, real-time experience of a modern collaborative editor, while keeping your actual files securely rooted in your own repositories."
+      answer: "Marktwin is a collaborative agent workspace for defining rules, skills, tools, boundaries, examples, and decisions together before an owner publishes reviewed Markdown to GitHub."
     },
     {
       id: "where-is-content-stored",
       question: "Where is my document content stored?",
-      answer: "Your documents live exclusively in your GitHub repository and temporarily in your browser while you edit. Our servers never store your notes or your markdown files."
+      answer: "Published documents live in your GitHub repository. Selected files and unsynced work also live temporarily in collaborating browsers. Marktwin servers do not receive or store the Markdown."
     },
     {
       id: "private-collaboration-works",
@@ -29,7 +29,7 @@ export default function FAQPage() {
     {
       id: "edit-view-links",
       question: "What is the difference between edit and view links?",
-      answer: "Edit links let people make changes to the document with you. View links are strictly read-only. But both can chat with you."
+      answer: "Edit links can change Markdown and participate in Discussion. View links can read and discuss but cannot send document or owner-control updates. Only the owner can review and publish to GitHub."
     },
     {
       id: "collaborators-accounts",
@@ -39,13 +39,13 @@ export default function FAQPage() {
     {
       id: "gitlab-support",
       question: "Can I connect my gitlab repo?",
-      answer: "GitLab support is coming soon!"
+      answer: "Not currently. The present Git adapter targets GitHub; GitLab support is not committed to a release date."
     },
 
     {
       id: "offline-work",
       question: "Can I work offline?",
-      answer: "Yes! Because your files are loaded directly into your browser's memory, you can continue typing even if you lose your internet connection. Just make sure you do not close the browser tab until you are back online and have pushed your changes to GitHub."
+      answer: "If GitHub disconnects after loading, staged work remains in the open browser and live peers can continue where their WebRTC connection survives. It is not a durable offline draft: do not close every copy before reconnecting and syncing."
     },
     {
       id: "merge-conflicts",
@@ -55,7 +55,7 @@ export default function FAQPage() {
     {
       id: "mobile-browsers",
       question: "Does it work on mobile browsers?",
-      answer: "We are working on it!"
+      answer: "Yes for reading, Discussion, presence, decision capture, Changes review, and small edits. Files, Document, Discussion, and Changes use mobile panel navigation; complex tree administration is still best on desktop."
     },
     {
       id: "self-host",

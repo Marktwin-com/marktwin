@@ -5,20 +5,20 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/contexts/theme-context";
 import MyCabinets from "@/pages/my-cabinets";
+import { lazy, Suspense } from "react";
 
-import ManualPairPage from "@/pages/manual-pair";
-import VaultPage from "@/pages/vault";
-import FAQPage from "@/pages/faq";
-import ContactPage from "@/pages/contact";
-import NotFound from "@/pages/not-found";
-import GitHubCallbackPage from "@/pages/github-callback";
-import PrivacyPage from "@/pages/privacy";
-import TermsPage from "@/pages/terms";
-import { FontProvider } from "@/contexts/font-context";
+const ManualPairPage = lazy(() => import("@/pages/manual-pair"));
+const VaultPage = lazy(() => import("@/pages/vault"));
+const FAQPage = lazy(() => import("@/pages/faq"));
+const ContactPage = lazy(() => import("@/pages/contact"));
+const NotFound = lazy(() => import("@/pages/not-found"));
+const GitHubCallbackPage = lazy(() => import("@/pages/github-callback"));
+const PrivacyPage = lazy(() => import("@/pages/privacy"));
+const TermsPage = lazy(() => import("@/pages/terms"));
 
 function Router() {
   return (
-    <Switch>
+    <Suspense fallback={<div className="min-h-screen bg-background p-6 text-sm text-muted-foreground">Loading Marktwin…</div>}><Switch>
       <Route path="/" component={MyCabinets} />
       <Route path="/faq" component={FAQPage} />
       <Route path="/contact" component={ContactPage} />
@@ -32,22 +32,20 @@ function Router() {
       <Route path="/privacy" component={PrivacyPage} />
       <Route path="/terms" component={TermsPage} />
       <Route component={NotFound} />
-    </Switch>
+    </Switch></Suspense>
   );
 }
 
 function App() {
   return (
-    <FontProvider>
-      <QueryClientProvider client={queryClient}>
+    <QueryClientProvider client={queryClient}>
         <ThemeProvider>
           <TooltipProvider>
             <Toaster />
             <Router />
           </TooltipProvider>
         </ThemeProvider>
-      </QueryClientProvider>
-    </FontProvider>
+    </QueryClientProvider>
   );
 }
 

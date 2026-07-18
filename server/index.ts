@@ -23,7 +23,7 @@ app.use((_req, res, next) => {
         "img-src 'self' data: blob:",
         "style-src 'self' 'unsafe-inline'",
         "script-src 'self'",
-        "connect-src 'self' https://api.github.com ws: wss:",
+        "connect-src 'self' https://api.github.com https://github.com ws: wss:",
       ].join("; "),
     );
   }
