@@ -2,15 +2,13 @@
 
 **Craft, together.**
 
-Private, collaborative agent workspaces backed by Markdown in your GitHub repositories.
+Marktwin is my hobby project for working together on Markdown files that stay in your GitHub repositories.
 
-Marktwin is a self-hostable space for defining agent missions, rules, skills,
-tools, boundaries, examples, and review criteria together. It opens selected
-Markdown scopes from GitHub, supports encrypted live collaboration and
-discussion, and gives the owner an explicit Changes review before one atomic
-GitHub commit—without a server-side database or account system.
+Edit, discuss and review changes together, then sync them back to GitHub. Your files stay yours.
 
-Hosted version: [marktwin.com](https://marktwin.com)
+Try it free at [marktwin.com](https://marktwin.com).
+
+If you have feedback or wish it did something more, let me know. It gives me another reason to procrastinate and work on it.
 
 ## Why Marktwin Exists
 
