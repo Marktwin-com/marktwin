@@ -75,7 +75,7 @@
     "express": "^4.22.2",
     "highlight.js": "11.11.1",
     "intl-messageformat": "^11.2.13",
-    "js-sha256": "^0.11.1",
+    "js-sha256": "^1.0.0",
     "katex": "0.19.0",
     "lucide-react": "^0.453.0",
     "marked": "^15.0.12",
