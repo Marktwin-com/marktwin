@@ -3,13 +3,14 @@ import test from "node:test";
 
 import {
   GitHubApiError,
+  BranchAdvancedError,
   commitAtomicChanges,
   createPrivateRepository,
   getRepository,
   getRootSnapshot,
   loadScopeSnapshot,
   makeConflictBranchName,
-} from "../client/src/lib/browser-github.ts";
+} from "../client/src/lib/workspace-github.ts";
 
 const originalFetch = globalThis.fetch;
 
@@ -191,7 +192,7 @@ test("atomic sync publishes one commit and fast-forwards the branch", async () =
     changes: [{ path: ".agents/EMPTY.md", content: "" }, { path: ".agents/OLD.md", sha: null }],
     message: "Update workspace",
   });
-  assert.deepEqual(result, { commitSha: "commit-2", branch: "main", branchCreated: false });
+  assert.deepEqual(result, { commitSha: "commit-2", treeSha: "tree-2" });
   assert.equal(requests.filter((request) => request.url.endsWith("/git/commits")).length, 1);
   assert.deepEqual(requests[0].body.tree, [
     { path: ".agents/EMPTY.md", mode: "100644", type: "blob", content: "" },
@@ -199,32 +200,12 @@ test("atomic sync publishes one commit and fast-forwards the branch", async () =
   ]);
 });
 
-test("a non-fast-forward creates a conflict branch at the prepared commit", async () => {
+test("a non-fast-forward reports the new head without silently publishing to another branch", async () => {
   const requests: string[] = [];
-  const responses = [
-    jsonResponse({ sha: "tree-2" }, 201),
-    jsonResponse({ sha: "commit-2" }, 201),
-    jsonResponse({ message: "Reference update failed" }, 422),
-    jsonResponse({ object: { sha: "commit-from-github" } }),
-    jsonResponse({ ref: "refs/heads/main-marktwin" }, 201),
-  ];
-  globalThis.fetch = async (input) => {
-    requests.push(String(input));
-    return responses.shift()!;
-  };
-  const result = await commitAtomicChanges({
-    token: "token",
-    repoFullName: "acme/rules",
-    branch: "main",
-    baseCommitSha: "commit-1",
-    baseTreeSha: "tree-1",
-    changes: [{ path: ".agents/AGENTS.md", content: "rules" }],
-    message: "Update workspace",
-  });
-  assert.equal(result.branchCreated, true);
-  assert.equal(result.commitSha, "commit-2");
-  assert.match(result.branch, /^main-marktwin-\d{8}-\d{6}$/);
-  assert.equal(requests.at(-1)?.endsWith("/git/refs"), true);
+  const responses = [jsonResponse({ sha: "tree-2" }, 201), jsonResponse({ sha: "commit-2" }, 201), jsonResponse({ message: "Reference update failed" }, 422), jsonResponse({ object: { sha: "commit-from-github" } })];
+  globalThis.fetch = async input => { requests.push(String(input)); return responses.shift()!; };
+  await assert.rejects(commitAtomicChanges({ token: "token", repoFullName: "acme/rules", branch: "main", baseCommitSha: "commit-1", baseTreeSha: "tree-1", changes: [{ path: ".agents/AGENTS.md", content: "rules" }], message: "Update workspace" }), error => error instanceof BranchAdvancedError);
+  assert.equal(requests.some(url => url.endsWith("/git/refs")), false);
 });
 
 test("a rejected ref update without a changed head remains retryable", async () => {
@@ -251,7 +232,7 @@ test("a rejected ref update without a changed head remains retryable", async () 
 
 test("conflict branch names are stable and Git-safe", () => {
   assert.equal(
-    makeConflictBranchName("feature/agent rules", new Date(2026, 6, 18, 9, 7, 5)),
-    "feature-agent-rules-marktwin-20260718-090705",
+    makeConflictBranchName("feature/agent rules", "writer", new Date(2026, 6, 18, 9, 7, 5)),
+    "feature-agent-rules-marktwin-backup-writer-20260718-090705",
   );
 });

@@ -1,6 +1,724 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Merriweather:wght@400;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Roboto+Slab:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Source+Sans+3:ital,wght@0,200..900;1,200..900&display=swap');
+
+@import "tailwindcss";
+@config "../tailwind.config.cjs";
+
+/* Bear-like surfaces rely on tonal fills and broad, low-contrast shadows
+   rather than dark outlines. Keep these as shared classes so cards, popups,
+   and embedded content all use the same visual language. */
+@layer components {
+  .marktwin-surface-shadow {
+    box-shadow: 0 10px 28px hsl(var(--obsidian-shadow) / 0.08),
+      0 2px 8px hsl(var(--obsidian-shadow) / 0.04) !important;
+  }
+
+  .marktwin-elevated-shadow {
+    box-shadow: 0 22px 54px hsl(var(--obsidian-shadow) / 0.16),
+      0 4px 14px hsl(var(--obsidian-shadow) / 0.08) !important;
+  }
+
+  .marktwin-control-shadow {
+    box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.1),
+      0 2px 8px hsl(var(--obsidian-shadow) / 0.05) !important;
+  }
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  overscroll-behavior: none;
+  line-height: 1.6;
+}
+
+/* Keep browser text selection inside Marktwin's palette instead of falling
+   back to the platform blue. The accent follows the active theme, so the
+   selection feels intentional on landing pages and inside the workspace. */
+::selection {
+  background: hsl(var(--obsidian-accent) / 0.24);
+  color: hsl(var(--obsidian-text));
+}
+
+::-moz-selection {
+  background: hsl(var(--obsidian-accent) / 0.24);
+  color: hsl(var(--obsidian-text));
+}
+
+/* Error and status copy should be inspectable and copyable, including toast
+   notifications and async validation messages. */
+[role="alert"],
+[aria-live="assertive"] {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.h-screen {
+  height: 100dvh;
+}
+
+@supports (padding: env(safe-area-inset-bottom)) {
+  .safe-area-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+.drawing-toolbar-right .App-menu_top {
+  direction: rtl;
+}
+
+.drawing-toolbar-right .App-menu_top > * {
+  direction: ltr;
+}
+
+.excalidraw .scroll-back-to-content {
+  padding: 0.45rem 0.75rem;
+  font-size: 0.75rem;
+  line-height: 1.25;
+}
+
+.excalidraw-modal-container .marktwin-excalidraw-help-close {
+  z-index: 3;
+  display: inline-flex;
+  width: 2rem;
+  height: 2rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.375rem;
+  font-family: Arial, sans-serif;
+  font-size: 1.75rem;
+  font-weight: 300;
+  line-height: 1;
+}
+
+@media (pointer: coarse) {
+  .react-flow__controls-button {
+    min-width: 42px;
+    min-height: 42px;
+  }
+}
+
+.workspace-chat-panel {
+  width: min(100vw, var(--workspace-chat-width));
+}
+
+.workspace-mobile-shell {
+  padding-bottom: calc(3.5rem + env(safe-area-inset-bottom, 0px));
+}
+
+.workspace-mobile-nav {
+  height: calc(3.5rem + env(safe-area-inset-bottom, 0px));
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+@media (min-width: 640px) {
+  .workspace-mobile-shell {
+    padding-bottom: 0;
+  }
+}
+
+@media (max-width: 639px) {
+  .workspace-chat-panel,
+  .chat-panel {
+    width: 100vw !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    height: 100dvh !important;
+  }
+}
+
+.workspace-chat-resizer {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  z-index: 50;
+  width: 8px;
+}
+
+/* Keep desktop icon hover surfaces quiet and compact. Touch layouts retain
+   the larger target below for comfortable tapping. */
+.workspace-touch-control {
+  width: 2rem;
+  height: 2rem;
+}
+
+@media (min-width: 640px) {
+  .workspace-main-with-chat {
+    margin-right: min(var(--workspace-chat-width), max(200px, calc(100vw - 320px)));
+  }
+
+  .workspace-chat-panel {
+    width: min(var(--workspace-chat-width), max(200px, calc(100vw - 320px)));
+  }
+
+  .workspace-chat-resizer {
+    right: min(var(--workspace-chat-width), max(200px, calc(100vw - 320px)));
+  }
+}
+
+@media (pointer: coarse) {
+  .workspace-touch-control {
+    width: 2.5rem !important;
+    height: 2.5rem !important;
+  }
+
+  .workspace-tree-row,
+  .file-item {
+    min-height: 2.75rem;
+    height: 2.75rem;
+  }
+}
+
+.workspace-markdown-editor .cm-scroller {
+  scrollbar-width: none;
+}
+
+.workspace-markdown-editor .cm-scroller::-webkit-scrollbar {
+  display: none;
+}
+
+.workspace-editor-toolbar {
+  scrollbar-width: none;
+  background: transparent;
+}
+
+.workspace-editor-toolbar::-webkit-scrollbar,
+.workspace-editor-formatting::-webkit-scrollbar {
+  display: none;
+}
+
+.workspace-editor-formatting {
+  scrollbar-width: none;
+  backdrop-filter: blur(12px);
+}
+
+.workspace-split-resizer {
+  position: relative;
+  z-index: 20;
+  width: 7px;
+  background: hsl(var(--obsidian-bg));
+  border-inline: 1px solid hsl(var(--obsidian-border));
+  transition: background 120ms ease;
+}
+
+.workspace-split-resizer--horizontal {
+  width: 100%;
+  height: 7px;
+  border-inline: 0;
+  border-block: 1px solid hsl(var(--obsidian-border));
+}
+
+.workspace-split-resizer:hover,
+.workspace-split-resizer[data-resize-handle-active] {
+  background: hsl(var(--obsidian-accent) / 0.16);
+}
+
+.workspace-focus-toolbar {
+  background: linear-gradient(to bottom, hsl(var(--obsidian-bg) / 0.96), hsl(var(--obsidian-bg) / 0));
+  opacity: 0.16;
+  transition: opacity 160ms ease;
+}
+
+.workspace-focus-toolbar:hover,
+.workspace-focus-toolbar:focus-within {
+  opacity: 1;
+}
+
+.workspace-slash-command {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.625rem;
+  border-radius: 0.5rem;
+  padding: 0.5rem;
+  text-align: left;
+  font-size: 0.875rem;
+  color: hsl(var(--obsidian-text));
+}
+
+.workspace-slash-command:hover,
+.workspace-slash-command:focus-visible {
+  background: hsl(var(--obsidian-panel-hover));
+  outline: none;
+}
+
+/* Source-backed live Markdown presentation. The decorations never alter the
+   document; every visual element still maps to the collaborative Y.Text. */
+.workspace-markdown-editor .marktwin-md-marker {
+  color: hsl(var(--obsidian-text-muted) / 0.66);
+  font-weight: 400;
+  transition: color 120ms ease, opacity 120ms ease;
+}
+
+.workspace-markdown-editor .marktwin-live-heading {
+  color: hsl(var(--obsidian-text));
+  font-weight: 750;
+  line-height: 1.28;
+  letter-spacing: -0.018em;
+  padding-top: 0.62em;
+  padding-bottom: 0.12em;
+}
+
+/* CodeMirror's default Markdown highlighter underlines heading spans. Live
+   headings already communicate hierarchy through scale and weight. */
+.workspace-markdown-editor .marktwin-live-heading > span {
+  text-decoration: none !important;
+}
+
+.workspace-markdown-editor .marktwin-section-fold {
+  display: inline-flex;
+  width: 1.15rem;
+  height: 1.3rem;
+  margin-left: -1.35rem;
+  margin-right: 0.2rem;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: hsl(var(--obsidian-text-muted));
+  cursor: pointer;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.8rem;
+  line-height: 1;
+  opacity: 0.62;
+  vertical-align: 0.12em;
+}
+
+.workspace-markdown-editor .cm-line:hover .marktwin-section-fold,
+.workspace-markdown-editor .marktwin-section-fold:hover,
+.workspace-markdown-editor .marktwin-section-fold:focus-visible {
+  background: hsl(var(--obsidian-panel));
+  color: hsl(var(--obsidian-accent));
+  opacity: 1;
+  outline: none;
+}
+
+.workspace-markdown-editor .marktwin-section-fold:focus-visible {
+  box-shadow: 0 0 0 2px hsl(var(--obsidian-accent) / 0.35);
+}
+
+.workspace-markdown-editor .cm-foldPlaceholder {
+  border: 0;
+  border-radius: 999px;
+  background: hsl(var(--obsidian-panel));
+  color: hsl(var(--obsidian-text-muted));
+  padding: 0 0.45em;
+}
+
+.workspace-markdown-editor .marktwin-live-h1 { font-size: 2.08em; }
+.workspace-markdown-editor .marktwin-live-h2 { font-size: 1.62em; }
+.workspace-markdown-editor .marktwin-live-h3 { font-size: 1.31em; }
+.workspace-markdown-editor .marktwin-live-h4 { font-size: 1.12em; }
+.workspace-markdown-editor .marktwin-live-h5,
+.workspace-markdown-editor .marktwin-live-h6 { font-size: 1em; }
+.workspace-markdown-editor .marktwin-live-strong { font-weight: 750; }
+.workspace-markdown-editor .marktwin-live-em { font-style: italic; }
+.workspace-markdown-editor .marktwin-live-strike { text-decoration: line-through; }
+.workspace-markdown-editor .marktwin-live-u { text-decoration: underline; }
+.workspace-markdown-editor .marktwin-live-sup { vertical-align: super; font-size: 0.75em; }
+.workspace-markdown-editor .marktwin-live-sub { vertical-align: sub; font-size: 0.75em; }
+.workspace-markdown-editor .marktwin-live-summary { font-weight: 750; }
+.workspace-markdown-editor .marktwin-live-link { color: hsl(var(--obsidian-accent)); text-decoration: underline; text-underline-offset: 2px; }
+.workspace-markdown-editor .marktwin-live-inline-code,
+.workspace-markdown-editor .marktwin-live-math-source {
+  border-radius: 4px;
+  background: hsl(var(--obsidian-panel));
+  color: hsl(var(--obsidian-accent));
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+  padding: 0.08em 0.28em;
+}
+
+.workspace-markdown-editor .marktwin-live-code-fence {
+  background: hsl(var(--obsidian-panel) / 0.7);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+}
+
+.workspace-markdown-editor .marktwin-live-frontmatter-line {
+  border-left: 3px solid hsl(var(--obsidian-accent) / 0.5);
+  background: hsl(var(--obsidian-panel) / 0.68);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+  padding-left: 12px;
+}
+
+.workspace-markdown-editor .marktwin-live-callout {
+  border-left: 4px solid hsl(var(--obsidian-accent));
+  background: hsl(var(--obsidian-accent) / 0.08);
+  padding-left: 12px;
+}
+.workspace-markdown-editor .marktwin-live-callout-tip { border-color: hsl(var(--obsidian-success)); background: hsl(var(--obsidian-success) / 0.09); }
+.workspace-markdown-editor .marktwin-live-callout-warning,
+.workspace-markdown-editor .marktwin-live-callout-caution { border-color: hsl(var(--obsidian-warning)); background: hsl(var(--obsidian-warning) / 0.1); }
+.workspace-markdown-editor .marktwin-live-callout-important { border-color: hsl(var(--obsidian-accent)); background: hsl(var(--obsidian-accent) / 0.1); }
+.workspace-markdown-editor .marktwin-live-quote {
+  border-left: 3px solid hsl(var(--obsidian-border));
+  color: hsl(var(--obsidian-text-muted));
+  font-style: italic;
+  padding-left: 14px;
+}
+.workspace-markdown-editor .marktwin-live-list { padding-left: 0.12em; }
+.workspace-markdown-editor .marktwin-live-list-marker {
+  display: inline-block;
+  min-width: 1.15em;
+  margin-right: 0.12em;
+  color: hsl(var(--obsidian-accent));
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-weight: 700;
+  text-align: center;
+}
+.workspace-markdown-editor .marktwin-live-callout-title {
+  display: inline-flex;
+  margin-right: 0.45em;
+  color: currentColor;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.78em;
+  font-style: normal;
+  font-weight: 750;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+}
+.workspace-markdown-editor .marktwin-live-callout-title[role="button"] { cursor: text; }
+.workspace-markdown-editor .marktwin-live-footnote-ref {
+  display: inline-flex;
+  min-width: 1.1em;
+  height: 1.1em;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: hsl(var(--obsidian-accent) / 0.12);
+  color: hsl(var(--obsidian-accent));
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.65em;
+  font-weight: 750;
+  line-height: 1;
+  vertical-align: super;
+}
+.workspace-markdown-editor .marktwin-live-footnote-definition {
+  color: hsl(var(--obsidian-text-muted));
+  font-size: 0.88em;
+}
+.workspace-markdown-editor .marktwin-live-footnote-definition-marker {
+  display: inline-block;
+  min-width: 1.7em;
+  color: hsl(var(--obsidian-accent));
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-weight: 750;
+}
+.workspace-markdown-editor .marktwin-projected-remote-caret {
+  position: relative;
+  display: inline-block;
+  width: 0;
+  height: 1.35em;
+  border-left: 2px solid var(--marktwin-remote-color, #30bced);
+  margin-left: -1px;
+  pointer-events: none;
+  vertical-align: -0.24em;
+  z-index: 4;
+}
+.workspace-markdown-editor .marktwin-projected-remote-caret-block {
+  width: 3px;
+  height: 2.1em;
+  border-radius: 2px;
+  background: var(--marktwin-remote-color, #30bced);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--marktwin-remote-color, #30bced) 16%, transparent);
+  vertical-align: -0.72em;
+}
+.workspace-markdown-editor .marktwin-projected-remote-caret-label {
+  position: absolute;
+  left: -1px;
+  bottom: 100%;
+  max-width: 11rem;
+  border-radius: 4px 4px 4px 0;
+  background: var(--marktwin-remote-color, #30bced);
+  padding: 1px 5px;
+  color: white;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 650;
+  line-height: 1.45;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workspace-markdown-editor .marktwin-live-rule { border-bottom: 1px solid hsl(var(--obsidian-border)); color: transparent; }
+
+.marktwin-live-widget {
+  box-sizing: border-box;
+  width: min(100%, 1040px);
+  margin: 0;
+  border: 1px solid hsl(var(--obsidian-border));
+  border-radius: 14px;
+  background: hsl(var(--obsidian-panel) / 0.62);
+  color: hsl(var(--obsidian-text));
+  overflow: auto;
+  box-shadow: 0 12px 32px hsl(var(--obsidian-shadow) / 0.075),
+    0 2px 8px hsl(var(--obsidian-shadow) / 0.035);
+  transition: border-color 140ms ease, box-shadow 140ms ease, background-color 140ms ease;
+}
+.marktwin-live-widget:hover {
+  border-color: hsl(var(--obsidian-accent) / 0.55);
+  background: hsl(var(--obsidian-panel) / 0.78);
+  box-shadow: 0 16px 34px hsl(var(--obsidian-shadow) / 0.12),
+    0 3px 10px hsl(var(--obsidian-shadow) / 0.06);
+}
+.marktwin-live-widget-updating {
+  border-color: hsl(var(--obsidian-accent) / 0.38);
+}
+.marktwin-live-widget-updating > :not([aria-hidden="true"]) {
+  opacity: 0.82;
+}
+.marktwin-live-widget-stale {
+  border-color: hsl(var(--obsidian-warning) / 0.62);
+}
+.marktwin-live-widget[data-widget-status]::after {
+  content: attr(data-widget-status);
+  display: block;
+  border-top: 1px solid hsl(var(--obsidian-border));
+  padding: 5px 10px;
+  color: hsl(var(--obsidian-warning));
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.025em;
+  text-align: left;
+}
+.marktwin-live-widget:not(.marktwin-live-inline-math):not(.marktwin-live-table):not(.marktwin-live-code):not(.marktwin-live-math):not(.marktwin-live-mermaid):not(.marktwin-live-image)::before {
+  content: attr(data-widget-label);
+  display: block;
+  border-bottom: 1px solid hsl(var(--obsidian-border));
+  padding: 5px 10px;
+  color: hsl(var(--obsidian-text-muted));
+  font-family: Inter, -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-align: left;
+  text-transform: uppercase;
+}
+.marktwin-live-widget:focus-visible { outline: 2px solid hsl(var(--obsidian-accent)); outline-offset: 2px; }
+.marktwin-live-math { padding: 14px 18px; color: var(--syntax-math); text-align: center; line-height: 1.25; }
+.marktwin-live-inline-math { display: inline-flex; width: auto; margin: 0 0.12em; border: 0; background: transparent; color: var(--syntax-math); overflow: visible; vertical-align: middle; }
+.marktwin-live-math .katex .mop,
+.marktwin-live-inline-math .katex .mop { color: var(--syntax-function); }
+.marktwin-live-math .katex :is(.mbin, .mrel),
+.marktwin-live-inline-math .katex :is(.mbin, .mrel) { color: var(--syntax-keyword); }
+.marktwin-live-math .katex :is(.mopen, .mclose, .mpunct),
+.marktwin-live-inline-math .katex :is(.mopen, .mclose, .mpunct) { color: var(--syntax-punctuation); }
+.marktwin-live-mermaid { min-height: 100px; padding: 18px; text-align: center; }
+.marktwin-live-mermaid svg { max-width: 100%; height: auto; }
+.marktwin-live-mermaid svg text,
+.marktwin-live-mermaid svg .nodeLabel,
+.marktwin-live-mermaid svg .edgeLabel,
+.marktwin-live-mermaid svg .label { fill: var(--diagram-text) !important; color: var(--diagram-text) !important; }
+.marktwin-live-mermaid svg .nodeLabel p,
+.marktwin-live-mermaid svg .edgeLabel p { color: var(--diagram-text) !important; }
+.marktwin-live-code { padding: 0; background: var(--syntax-background); }
+.marktwin-live-code .marktwin-code-block {
+  min-height: 4.5rem;
+  margin: 0;
+  border: 0;
+  border-radius: 13px;
+  background: transparent;
+  box-shadow: none;
+  padding: 30px 18px 18px !important;
+  text-align: left;
+}
+.marktwin-live-code .marktwin-code-language { top: 8px; right: 12px; letter-spacing: 0.08em; }
+.marktwin-live-code code { display: block; min-width: max-content; line-height: 1.62; }
+.marktwin-live-image {
+  position: relative;
+  display: flex;
+  min-height: 80px;
+  align-items: center;
+  justify-content: center;
+  padding: 14px 12px;
+}
+.marktwin-live-image::before { position: absolute; inset: 0 0 auto; box-sizing: border-box; }
+.marktwin-live-image img {
+  display: block;
+  max-width: 100%;
+  max-height: 70vh;
+  border-radius: 9px;
+  object-fit: contain;
+  transition: width 160ms ease;
+}
+.marktwin-live-image-controls {
+  position: absolute;
+  top: 3px;
+  right: 7px;
+  display: inline-flex;
+  height: 24px;
+  align-items: center;
+  gap: 3px;
+  border-radius: 7px;
+  background: hsl(var(--obsidian-panel) / 0.9);
+  padding: 1px 3px;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+.marktwin-live-image-size-button {
+  display: inline-grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: hsl(var(--obsidian-text));
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+.marktwin-live-image-size-button:hover:not(:disabled),
+.marktwin-live-image-size-button:focus-visible { background: hsl(var(--obsidian-accent) / 0.14); color: hsl(var(--obsidian-accent)); }
+.marktwin-live-image-size-button:focus-visible { outline: 1px solid hsl(var(--obsidian-accent)); }
+.marktwin-live-image-size-button:disabled { opacity: 0.35; cursor: default; }
+.marktwin-live-image-size { min-width: 3.4em; color: hsl(var(--obsidian-text-muted)); font-size: 10px; font-weight: 700; text-align: center; }
+.marktwin-markdown .marktwin-sized-image { display: block; margin-inline: auto; }
+.marktwin-live-table { position: relative; padding: 0; overflow: visible; line-height: 0; }
+.marktwin-live-table > .marktwin-table-wrap { display: block; line-height: 1.45; }
+.marktwin-table-wrap { overflow-x: auto; }
+.marktwin-table-wrap:focus-visible { outline: 2px solid hsl(var(--obsidian-accent)); outline-offset: 2px; }
+.marktwin-table-add-controls { position: absolute; inset: 0; pointer-events: none; }
+.marktwin-table-add-button {
+  position: absolute;
+  z-index: 2;
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border: 1px solid hsl(var(--obsidian-border));
+  border-radius: 999px;
+  background: hsl(var(--obsidian-bg));
+  color: hsl(var(--obsidian-accent));
+  font: 650 18px/1 ui-sans-serif, system-ui, sans-serif;
+  box-shadow: 0 4px 12px hsl(var(--obsidian-shadow) / 0.16);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.86);
+  transition: opacity 150ms ease, transform 150ms ease, background-color 150ms ease, color 150ms ease;
+}
+.marktwin-live-table:hover .marktwin-table-add-button,
+.marktwin-live-table:focus-within .marktwin-table-add-button,
+.marktwin-table-add-button:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: scale(1);
+}
+.marktwin-table-add-button:hover,
+.marktwin-table-add-button:focus-visible { border-color: hsl(var(--obsidian-accent) / 0.62); background: hsl(var(--obsidian-accent)); color: hsl(var(--obsidian-bg)); }
+.marktwin-table-add-button:focus-visible { outline: 2px solid hsl(var(--obsidian-accent) / 0.35); outline-offset: 2px; }
+.marktwin-table-add-column { top: 50%; right: -12px; transform: translateY(-50%) scale(0.86); }
+.marktwin-live-table:hover .marktwin-table-add-column,
+.marktwin-live-table:focus-within .marktwin-table-add-column,
+.marktwin-table-add-column:focus-visible { transform: translateY(-50%) scale(1); }
+.marktwin-table-add-row { bottom: -12px; left: 50%; transform: translateX(-50%) scale(0.86); }
+.marktwin-live-table:hover .marktwin-table-add-row,
+.marktwin-live-table:focus-within .marktwin-table-add-row,
+.marktwin-table-add-row:focus-visible { transform: translateX(-50%) scale(1); }
+.marktwin-live-table table,
+.marktwin-markdown table { width: 100%; border-collapse: collapse; }
+.marktwin-live-table table,
+.marktwin-markdown table { margin: 0; }
+.marktwin-live-table th,
+.marktwin-live-table td,
+.marktwin-markdown th,
+.marktwin-markdown td { border: 1px solid var(--table-border); padding: 8px 10px; }
+.marktwin-live-table th,
+.marktwin-markdown th { background: var(--table-header-background); font-weight: 700; }
+.marktwin-live-table tbody tr:nth-child(even),
+.marktwin-markdown tbody tr:nth-child(even) { background: var(--table-row-alternate); }
+.marktwin-live-task {
+  width: 1.05em;
+  height: 1.05em;
+  margin: 0 0.5em 0 0;
+  accent-color: hsl(var(--obsidian-accent));
+  cursor: pointer;
+  vertical-align: -0.1em;
+}
+
+.marktwin-markdown { color: hsl(var(--obsidian-text)); }
+.marktwin-markdown h1,
+.marktwin-markdown h2,
+.marktwin-markdown h3,
+.marktwin-markdown h4,
+.marktwin-markdown h5,
+.marktwin-markdown h6 { color: hsl(var(--obsidian-text)); font-weight: 750; }
+.marktwin-markdown a { color: hsl(var(--obsidian-accent)); }
+.marktwin-markdown pre { background: var(--syntax-background); color: hsl(var(--obsidian-text)); }
+.marktwin-markdown :not(pre) > code { background: var(--syntax-background); color: var(--syntax-variable); }
+.marktwin-markdown ul ul { list-style-type: circle; }
+.marktwin-markdown ul ul ul { list-style-type: square; }
+.marktwin-markdown ul ul ul ul { list-style-type: disclosure-closed; }
+.marktwin-markdown details {
+  margin: 18px 0;
+  border: 1px solid hsl(var(--obsidian-border));
+  border-radius: 12px;
+  background: hsl(var(--obsidian-panel) / 0.48);
+  padding: 10px 14px;
+}
+.marktwin-markdown details[open] { padding-bottom: 12px; }
+.marktwin-markdown summary {
+  cursor: pointer;
+  color: hsl(var(--obsidian-text));
+  font-weight: 700;
+}
+.marktwin-markdown summary::marker { color: hsl(var(--obsidian-accent)); }
+.marktwin-code-block { position: relative; overflow-x: auto; border: 1px solid hsl(var(--obsidian-border)); border-radius: 10px; padding: 24px 16px 16px !important; box-shadow: 0 10px 28px hsl(var(--obsidian-shadow) / 0.08), 0 2px 8px hsl(var(--obsidian-shadow) / 0.04); }
+.marktwin-code-language { position: absolute; top: 5px; right: 9px; color: hsl(var(--obsidian-text-muted)); font-family: ui-monospace, monospace; font-size: 10px; text-transform: uppercase; }
+.marktwin-frontmatter { margin-bottom: 24px; border: 1px solid hsl(var(--obsidian-border)); border-radius: 10px; background: hsl(var(--obsidian-panel) / 0.7); overflow: hidden; box-shadow: 0 10px 28px hsl(var(--obsidian-shadow) / 0.08), 0 2px 8px hsl(var(--obsidian-shadow) / 0.04); }
+.marktwin-frontmatter-label { border-bottom: 1px solid hsl(var(--obsidian-border)); padding: 7px 12px; color: hsl(var(--obsidian-text-muted)); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; }
+.marktwin-frontmatter pre { margin: 0; border: 0; border-radius: 0; }
+.marktwin-callout { margin: 18px 0; border: 0; border-left: 4px solid hsl(var(--obsidian-accent)); border-radius: 7px; background: hsl(var(--obsidian-accent) / 0.08); padding: 12px 16px; color: hsl(var(--obsidian-text)); font-style: normal; }
+.marktwin-callout-title { margin-bottom: 5px; color: hsl(var(--obsidian-accent)); font-size: 0.82em; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; }
+.marktwin-callout-tip { border-color: hsl(var(--obsidian-success)); background: hsl(var(--obsidian-success) / 0.09); }
+.marktwin-callout-warning,
+.marktwin-callout-caution { border-color: hsl(var(--obsidian-warning)); background: hsl(var(--obsidian-warning) / 0.1); }
+.marktwin-math-block { margin: 18px 0; overflow-x: auto; padding: 12px; color: var(--syntax-math); text-align: center; }
+.marktwin-math-inline { display: inline-block; max-width: 100%; color: var(--syntax-math); vertical-align: middle; }
+.marktwin-math-block .katex .mop,
+.marktwin-math-inline .katex .mop { color: var(--syntax-function); }
+.marktwin-math-block .katex :is(.mbin, .mrel),
+.marktwin-math-inline .katex :is(.mbin, .mrel) { color: var(--syntax-keyword); }
+.marktwin-math-block .katex :is(.mopen, .mclose, .mpunct),
+.marktwin-math-inline .katex :is(.mopen, .mclose, .mpunct) { color: var(--syntax-punctuation); }
+.marktwin-mermaid { margin: 18px 0; overflow-x: auto; border: 1px solid hsl(var(--obsidian-border)); border-radius: 10px; background: hsl(var(--obsidian-panel) / 0.6); padding: 16px; text-align: center; box-shadow: 0 10px 28px hsl(var(--obsidian-shadow) / 0.08), 0 2px 8px hsl(var(--obsidian-shadow) / 0.04); }
+.marktwin-mermaid svg { max-width: 100%; height: auto; }
+.marktwin-render-error { display: block; border: 1px solid hsl(var(--obsidian-error)); border-radius: 6px; background: hsl(var(--obsidian-error) / 0.08); color: hsl(var(--obsidian-error)); padding: 8px; white-space: pre-wrap; }
+.marktwin-render-loading { color: hsl(var(--obsidian-text-muted)); font-size: 0.9em; }
+.marktwin-footnotes { margin-top: 36px; color: hsl(var(--obsidian-text-muted)); font-size: 0.88em; }
+.marktwin-repository-image:not([src]) { display: block; min-height: 80px; border: 1px dashed hsl(var(--obsidian-border)); }
+
+/* Highlight.js consumes the same semantic tokens as source-mode CodeMirror. */
+.hljs-comment,
+.hljs-quote { color: var(--syntax-comment); font-style: italic; }
+.hljs-keyword,
+.hljs-selector-tag { color: var(--syntax-keyword); }
+.hljs-string,
+.hljs-regexp,
+.hljs-symbol,
+.hljs-bullet { color: var(--syntax-string); }
+.hljs-number,
+.hljs-literal,
+.hljs-selector-pseudo { color: var(--syntax-number); }
+.hljs-title,
+.hljs-section,
+.hljs-function .hljs-title { color: var(--syntax-function); }
+.hljs-type,
+.hljs-built_in,
+.hljs-class .hljs-title { color: var(--syntax-type); }
+.hljs-variable,
+.hljs-template-variable,
+.hljs-attr,
+.hljs-attribute { color: var(--syntax-variable); }
+.hljs-meta,
+.hljs-doctag { color: var(--syntax-comment); }
+.hljs-operator,
+.hljs-punctuation { color: var(--syntax-punctuation); }
 
 @layer base {
   * {
@@ -9,6 +727,31 @@
 
   body {
     @apply antialiased bg-background text-foreground;
+  }
+
+  /* Font classes */
+  .font-inter {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+
+  .font-merriweather {
+    font-family: 'Merriweather', Georgia, serif;
+  }
+
+  .font-poppins {
+    font-family: 'Poppins', -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+
+  .font-robotoSlab {
+    font-family: 'Roboto Slab', Georgia, serif;
+  }
+
+  /* Ensure .prose uses the selected font if a font-* class is present */
+  .prose.font-inter,
+  .prose.font-merriweather,
+  .prose.font-poppins,
+  .prose.font-robotoSlab {
+    font-family: inherit !important;
   }
 
   /* Custom scrollbar */
@@ -79,7 +822,7 @@
 
   .markdown-preview code {
     @apply px-1 py-0.5 rounded text-sm font-mono;
-    background-color: hsl(var(--obsidian-border));
+    background-color: hsl(var(--obsidian-panel));
     color: hsl(var(--obsidian-accent));
   }
 
@@ -142,16 +885,21 @@
 
   /* File tree styles */
   .file-item {
-    @apply flex items-center p-2 rounded cursor-pointer transition-colors;
+    @apply flex h-9 items-center rounded px-2 py-0 cursor-pointer transition-colors;
   }
 
   .file-item:hover {
-    background-color: hsl(var(--obsidian-panel));
+    background-color: hsl(var(--obsidian-panel) / 0.52);
   }
 
   .file-item.active {
-    background-color: hsl(var(--obsidian-accent) / 0.2);
+    background-color: transparent;
     border-left: 2px solid hsl(var(--obsidian-accent));
+    padding-left: calc(0.5rem - 1px);
+  }
+
+  .file-item:not(:hover):not(.active) > svg {
+    color: hsl(var(--obsidian-text-muted) / 0.72) !important;
   }
 
   /* Collaboration styles */
@@ -176,10 +924,17 @@
   }
 }
 
+/* Keep the brand watermark quiet so the landing page content remains primary. */
+.light .marktwin-watermark { opacity: 0.025; }
+
 /* ────────────────────────────────────────────────────────────── */
 /*                         CORE VARIABLES (DARK THEME)           */
 /* ────────────────────────────────────────────────────────────── */
 :root {
+  /* A shared, Bear-inspired radius keeps surfaces soft without turning every
+     control into a pill. */
+  --radius: 0.875rem;
+
   --background: 225 6% 13%;
   --foreground: 210 40% 98%;
 
@@ -192,14 +947,14 @@
   --card: 217 10% 18%;
   --card-foreground: 210 40% 98%;
 
-  --border: 217 33% 17%;
-  --input: 217 33% 17%;
+  --border: 0 0% 100% / 0.09;
+  --input: 0 0% 100% / 0.13;
 
   --primary: 325 55% 45%;             /* brighter plum for dark backgrounds */
   --primary-foreground: 210 40% 98%;
   --secondary: 217 19% 27%;
   --secondary-foreground: 210 40% 98%;
-  --accent: 325 55% 45%;
+  --accent: 220 7% 23%;
   --accent-foreground: 210 40% 98%;
 
   --destructive: 0 84.2% 60.2%;
@@ -208,20 +963,53 @@
   --ring: 325 55% 45%;
 
   --obsidian-bg: 225 6% 13%;
-  --obsidian-sidebar: 217 10% 18%;
-  --obsidian-panel: 217 19% 27%;
-  --obsidian-border: 217 33% 17%;
+  --obsidian-sidebar: 225 6% 13%;
+  --obsidian-panel: 220 7% 18%;
+  --obsidian-panel-hover: 325 55% 45% / 0.16;
+  --obsidian-hover: 325 55% 45% / 0.16;
+  --sidebar-accent: 325 55% 45% / 0.16;
+  --sidebar-accent-foreground: 210 40% 98%;
+  --sidebar-ring: 325 55% 45%;
+  --obsidian-border: 0 0% 100% / 0.09;
   --obsidian-accent: 325 55% 45%;
   --obsidian-success: 142 76% 36%;
   --obsidian-error: 0 84% 60%;
   --obsidian-warning: 45 93% 47%;
+  --folder-icon: 215 12% 64%;
   --obsidian-text: 210 40% 98%;
   --obsidian-text-muted: 215 20.2% 65.1%;
+  --obsidian-shadow: 220 24% 6%;
+
+  /* Rich document tokens. Unlike the UI status colors, these carry editor
+     semantics and are shared by CodeMirror, Highlight.js, KaTeX, and
+     Mermaid. Named themes override the syntax colors with their real code
+     palettes; surfaces and diagrams continue to follow the active UI. */
+  --syntax-background: hsl(var(--obsidian-panel));
+  --syntax-comment: #8b92a1;
+  --syntax-keyword: #f07178;
+  --syntax-string: #9bcf8b;
+  --syntax-number: #e6b673;
+  --syntax-function: #82aaff;
+  --syntax-type: #c792ea;
+  --syntax-variable: #89ddff;
+  --syntax-punctuation: #c8d3e6;
+  --syntax-math: #c792ea;
+  --table-border: hsl(var(--obsidian-border));
+  --table-header-background: hsl(var(--obsidian-panel));
+  --table-row-alternate: hsl(var(--obsidian-panel) / 0.34);
+  --diagram-background: hsl(var(--obsidian-bg));
+  --diagram-primary: hsl(var(--obsidian-panel));
+  --diagram-secondary: hsl(var(--obsidian-accent) / 0.13);
+  --diagram-tertiary: hsl(var(--obsidian-sidebar));
+  --diagram-text: hsl(var(--obsidian-text));
+  --diagram-border: var(--syntax-type);
+  --diagram-line: var(--syntax-comment);
 }
 
 /* ────────────────────────────────────────────────────────────── */
-/*                         PLUM-CREAM THEME                      */
+/*                         WINE THEME                            */
 /* ────────────────────────────────────────────────────────────── */
+.wine,
 .plum-cream {
   --background: 325 48% 19%;          /* plum purple */
   --foreground: 43 77% 87%;           /* cream white */
@@ -235,16 +1023,16 @@
   --card: 325 30% 25%;
   --card-foreground: 43 77% 87%;
 
-  --border: 325 30% 25%;
-  --input: 325 30% 25%;
+  --border: 325 24% 40% / 0.18;
+  --input: 325 24% 40% / 0.24;
 
-  /* Adjusted button/primary/accent for contrast */
+  /* Primary keeps the theme accent; accent is a quiet, readable hover surface. */
   --primary: 43 77% 87%;               /* cream white for button backgrounds */
   --primary-foreground: 325 48% 19%;   /* plum purple text in buttons */
   --secondary: 325 30% 25%;
   --secondary-foreground: 43 77% 87%;
-  --accent: 43 77% 87%;                /* cream white for accent */
-  --accent-foreground: 325 48% 19%;    /* plum text in accent areas */
+  --accent: 325 30% 29%;
+  --accent-foreground: 43 77% 87%;
 
   --destructive: 0 84% 60%;
   --destructive-foreground: 43 77% 87%;
@@ -255,115 +1043,534 @@
   --obsidian-bg: 325 48% 19%;
   --obsidian-sidebar: 325 30% 25%;
   --obsidian-panel: 325 25% 22%;
-  --obsidian-border: 325 30% 25%;
+  --obsidian-panel-hover: 325 50% 25% / 0.18;
+  --obsidian-hover: 325 50% 25% / 0.18;
+  --sidebar-accent: 325 50% 25% / 0.18;
+  --sidebar-accent-foreground: 43 77% 87%;
+  --sidebar-ring: 43 77% 87%;
+  --obsidian-border: 325 24% 40% / 0.18;
   --obsidian-accent: 43 77% 87%;        /* cream accent for light buttons on dark backgrounds */
   --obsidian-success: 142 76% 36%;
   --obsidian-error: 0 84% 60%;
   --obsidian-warning: 45 93% 47%;
+  --folder-icon: 43 96% 56%;
   --obsidian-text: 43 77% 87%;
   --obsidian-text-muted: 43 30% 75%;
+  --obsidian-shadow: 325 32% 8%;
+  --syntax-comment: #b69aa7;
+  --syntax-keyword: #ff9dbb;
+  --syntax-string: #d7cc8a;
+  --syntax-number: #f2b47e;
+  --syntax-function: #c7b5ef;
+  --syntax-type: #8fd0c0;
+  --syntax-variable: #f1ddd1;
+  --syntax-punctuation: #ead9ce;
+  --syntax-math: #ddb7e3;
 }
 
 /* ────────────────────────────────────────────────────────────── */
 /*                         CREAM (formerly "light")              */
 /* ────────────────────────────────────────────────────────────── */
 .cream {
-  --background: 43 77% 87%;          /* cream white */
-  --foreground: 225 6% 13%;         /* darker text for better contrast */
+  --background: 42 45% 94%;
+  --foreground: 225 15% 13%;
 
-  --muted: 43 40% 85%;
-  --muted-foreground: 225 6% 25%;   /* darker muted text */
+  --muted: 42 40% 87%;
+  --muted-foreground: 225 12% 30%;
 
-  --popover: 43 77% 87%;
-  --popover-foreground: 225 6% 13%;
+  --popover: 42 60% 97%;
+  --popover-foreground: 225 15% 13%;
 
-  --card: 43 77% 87%;
-  --card-foreground: 225 6% 13%;
+  --card: 42 60% 97%;
+  --card-foreground: 225 15% 13%;
 
-  --border: 43 40% 85%;
-  --input: 43 40% 85%;
+  --border: 35 18% 35% / 0.10;
+  --input: 35 18% 35% / 0.15;
 
-  /* Adjusted buttons for contrast in cream mode */
-  --primary: 325 48% 19%;             /* plum purple buttons */
-  --primary-foreground: 43 77% 87%;   /* cream text in buttons */
-  --secondary: 43 60% 80%;
-  --secondary-foreground: 225 6% 13%;  /* darker text */
-  --accent: 325 48% 19%;
-  --accent-foreground: 43 77% 87%;
+  --primary: 325 50% 25%;
+  --primary-foreground: 43 70% 95%;
+  --secondary: 42 45% 84%;
+  --secondary-foreground: 225 15% 13%;
+  --accent: 42 28% 89%;
+  --accent-foreground: 225 15% 13%;
 
-  --destructive: 0 84% 60%;
-  --destructive-foreground: 43 77% 87%;
+  --destructive: 0 72% 42%;
+  --destructive-foreground: 43 70% 95%;
 
-  --ring: 325 48% 19%;
+  --ring: 325 50% 25%;
 
-  --obsidian-bg: 43 77% 87%;
-  --obsidian-sidebar: 43 60% 80%;
-  --obsidian-panel: 43 65% 83%;
-  --obsidian-border: 43 40% 85%;
-  --obsidian-accent: 325 48% 19%;
-  --obsidian-success: 142 76% 36%;
-  --obsidian-error: 0 84% 60%;
-  --obsidian-warning: 45 93% 47%;
-  --obsidian-text: 225 6% 13%;        /* darker text */
-  --obsidian-text-muted: 225 6% 25%;  /* darker muted text */
+  --obsidian-bg: 42 45% 94%;
+  --obsidian-sidebar: 42 45% 94%;
+  --obsidian-panel: 42 28% 89%;
+  --obsidian-panel-hover: 325 50% 25% / 0.10;
+  --obsidian-hover: 325 50% 25% / 0.10;
+  --sidebar-accent: 325 50% 25% / 0.10;
+  --sidebar-accent-foreground: 225 15% 13%;
+  --sidebar-ring: 325 50% 25%;
+  --obsidian-border: 35 18% 35% / 0.10;
+  --obsidian-accent: 325 50% 25%;
+  --obsidian-success: 142 72% 27%;
+  --obsidian-error: 0 72% 42%;
+  --obsidian-warning: 35 92% 31%;
+  --folder-icon: 225 9% 40%;
+  --obsidian-text: 225 15% 13%;
+  --obsidian-text-muted: 225 12% 30%;
+  --obsidian-shadow: 35 24% 34%;
+  --syntax-comment: #6f6a72;
+  --syntax-keyword: #9c3658;
+  --syntax-string: #497b3f;
+  --syntax-number: #a85f22;
+  --syntax-function: #315f9a;
+  --syntax-type: #79539b;
+  --syntax-variable: #276f73;
+  --syntax-punctuation: #4d4850;
+  --syntax-math: #79539b;
 }
 
 /* ────────────────────────────────────────────────────────────── */
-/*                         LIGHT (inverse of ".dark")            */
+/*                         LIGHT THEME                           */
 /* ────────────────────────────────────────────────────────────── */
-/* This "light" theme swaps background ↔ foreground, muted ↔ muted-foreground, etc. */
-/* But keeps --primary, --accent, --ring, --obsidian-accent identical to .dark's values */
 .light {
-  /* Invert what .dark defines for everything except the four "fixed" vars below */
-  --background: 210 40% 98%;        /* the former dark-foreground becomes light-background */
-  --foreground: 225 6% 13%;         /* darker text for better contrast */
+  --background: 36 20% 97%;
+  --foreground: 222 47% 11%;
 
-  --muted: 215 20.2% 65.1%;         /* dark-muted-foreground → new (light-muted) */
-  --muted-foreground: 225 6% 25%;   /* darker muted text */
+  --muted: 210 30% 93%;
+  --muted-foreground: 215 28% 29%;
 
-  --popover: 210 40% 98%;
-  --popover-foreground: 225 6% 13%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 47% 11%;
 
-  --card: 210 40% 98%;
-  --card-foreground: 225 6% 13%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
 
-  /* Add more contrast for borders and inputs */
-  --border: 215 25% 27%;
-  --input: 215 25% 27%;
+  --border: 225 10% 15% / 0.09;
+  --input: 225 10% 15% / 0.14;
 
-  /* ───────────────────────────────
-     The four vars forced to match .dark
-     ─────────────────────────────── */
-  --primary: 325 55% 45%;            /* same as .dark */
-  --accent: 325 55% 45%;             /* same as .dark */
-  --ring: 325 55% 45%;               /* same as .dark */
-  --obsidian-accent: 325 55% 45%;     /* same as .dark */
+  --primary: 325 50% 34%;
+  --accent: 36 14% 92%;
+  --ring: 325 50% 34%;
+  --obsidian-accent: 325 50% 34%;
 
-  /* Their "-foreground" counterparts remain inverted as before */
-  --primary-foreground: 210 40% 98%;  /* dark → new (light-primary-foreground) */
-  --secondary: 217 19% 27%;           /* dark-secondary → new (light-secondary) */
-  --secondary-foreground: 225 6% 13%; /* darker text */
-  --accent-foreground: 210 40% 98%;   /* dark-accent-foreground → new */
-  --destructive: 0 84.2% 60.2%;
+  --primary-foreground: 210 40% 98%;
+  --secondary: 210 28% 90%;
+  --secondary-foreground: 222 47% 11%;
+  --accent-foreground: 222 47% 11%;
+  --destructive: 0 72% 42%;
   --destructive-foreground: 210 40% 98%;
 
-  /* Keep the rest inverted but add more contrast for obsidian elements */
-  --obsidian-bg: 210 40% 98%;
-  --obsidian-sidebar: 210 35% 95%;    /* Slightly darker than bg for contrast */
-  --obsidian-panel: 210 30% 92%;      /* Even darker for panels */
-  --obsidian-border: 215 25% 27%;     /* Darker border for better visibility */
-  --obsidian-success: 142 76% 36%;
-  --obsidian-error: 0 84% 60%;
-  --obsidian-warning: 45 93% 47%;
-  --obsidian-text: 225 6% 13%;        /* darker text */
-  --obsidian-text-muted: 225 6% 25%;  /* darker muted text */
+  --obsidian-bg: 36 20% 97%;
+  --obsidian-sidebar: 36 20% 97%;
+  --obsidian-panel: 36 14% 92%;
+  --obsidian-panel-hover: 325 62% 36% / 0.11;
+  --obsidian-hover: 325 62% 36% / 0.11;
+  --sidebar-accent: 325 62% 36% / 0.11;
+  --sidebar-accent-foreground: 222 47% 11%;
+  --sidebar-ring: 325 62% 36%;
+  --obsidian-border: 225 10% 15% / 0.09;
+  --obsidian-success: 142 72% 27%;
+  --obsidian-error: 0 72% 42%;
+  --obsidian-warning: 35 92% 31%;
+  --folder-icon: 215 12% 42%;
+  --obsidian-text: 222 47% 11%;
+  --obsidian-text-muted: 215 28% 29%;
+  --obsidian-shadow: 220 24% 18%;
+  --syntax-comment: #667085;
+  --syntax-keyword: #a6264e;
+  --syntax-string: #357a38;
+  --syntax-number: #a14f03;
+  --syntax-function: #315ca8;
+  --syntax-type: #7c3e9d;
+  --syntax-variable: #146b72;
+  --syntax-punctuation: #344054;
+  --syntax-math: #7c3e9d;
 }
 
 /* ────────────────────────────────────────────────────────────── */
 /*                           DARK MODE                            */
 /* ────────────────────────────────────────────────────────────── */
-/* Note: Dark mode is now the default theme in :root */
+/* The Root preset remains dark; first-time visitors receive the Light class. */
 .dark {
   /* This class is kept for compatibility but uses the same values as :root */
   /* All variables are inherited from :root */
+}
+
+.theme-light { color-scheme: light; }
+.theme-dark { color-scheme: dark; }
+
+/* Optional themes use a compact semantic palette. Keeping these tokens in
+   CSS avoids putting every palette in the landing JavaScript while still
+   letting the complete workspace switch immediately from a single class. */
+:is(
+  .mono-light, .mono-dark,
+  .github-light, .github-dark,
+  .vscode-light, .vscode-dark,
+  .obsidian-light, .obsidian-dark,
+  .solarized-light, .solarized-dark,
+  .dracula, .nord, .rose-pine, .tokyo-night,
+  .catppuccin-latte, .catppuccin-macchiato,
+  .gruvbox-dark, .everforest-light, .everforest-dark
+) {
+  --background: var(--theme-bg);
+  --foreground: var(--theme-text);
+  --muted: var(--theme-panel);
+  --muted-foreground: var(--theme-muted-text);
+  --popover: var(--theme-sidebar);
+  --popover-foreground: var(--theme-text);
+  --card: var(--theme-card);
+  --card-foreground: var(--theme-text);
+  --border: var(--theme-border);
+  --input: var(--theme-border);
+  --primary: var(--theme-accent);
+  --primary-foreground: var(--theme-accent-text);
+  --secondary: var(--theme-panel);
+  --secondary-foreground: var(--theme-text);
+  --accent: var(--theme-hover-surface, var(--theme-panel));
+  --accent-foreground: var(--theme-text);
+  --destructive: var(--theme-error);
+  --destructive-foreground: var(--theme-destructive-text);
+  --ring: var(--theme-accent);
+  --obsidian-bg: var(--theme-bg);
+  --obsidian-sidebar: var(--theme-sidebar);
+  --obsidian-panel: var(--theme-panel);
+  --obsidian-panel-hover: var(--theme-accent) / var(--theme-hover-alpha);
+  --obsidian-hover: var(--theme-accent) / var(--theme-hover-alpha);
+  --sidebar-accent: var(--theme-accent) / var(--theme-hover-alpha);
+  --sidebar-accent-foreground: var(--theme-text);
+  --sidebar-ring: var(--theme-accent);
+  --obsidian-border: var(--theme-border);
+  --obsidian-accent: var(--theme-accent);
+  --obsidian-success: var(--theme-success);
+  --obsidian-error: var(--theme-error);
+  --obsidian-warning: var(--theme-warning);
+  --folder-icon: var(--theme-folder);
+  --obsidian-text: var(--theme-text);
+  --obsidian-text-muted: var(--theme-muted-text);
+  --obsidian-shadow: var(--theme-shadow);
+}
+
+.mono-light {
+  --theme-bg: 0 0% 100%; --theme-sidebar: 0 0% 100%; --theme-panel: 0 0% 96%; --theme-card: 0 0% 100%;
+  --theme-text: 0 0% 3%; --theme-muted-text: 0 0% 28%; --theme-accent: 0 0% 3%; --theme-accent-text: 0 0% 100%;
+  --theme-border: 0 0% 10% / 0.18; --theme-success: 0 0% 3%; --theme-error: 0 0% 3%; --theme-warning: 0 0% 3%;
+  --theme-folder: 0 0% 3%; --theme-shadow: 0 0% 0%; --theme-hover-alpha: 0.10; --theme-destructive-text: 0 0% 100%;
+}
+
+.mono-dark {
+  --theme-bg: 0 0% 0%; --theme-sidebar: 0 0% 0%; --theme-panel: 0 0% 5%; --theme-card: 0 0% 3%;
+  --theme-text: 0 0% 96%; --theme-muted-text: 0 0% 68%; --theme-accent: 0 0% 96%; --theme-accent-text: 0 0% 0%;
+  --theme-border: 0 0% 100% / 0.18; --theme-success: 0 0% 96%; --theme-error: 0 0% 96%; --theme-warning: 0 0% 96%;
+  --theme-folder: 0 0% 96%; --theme-shadow: 0 0% 0%; --theme-hover-alpha: 0.15; --theme-destructive-text: 225 18% 10%;
+}
+
+.github-light {
+  --theme-bg: 0 0% 100%; --theme-sidebar: 210 29% 97%; --theme-panel: 210 29% 97%; --theme-card: 0 0% 100%;
+  --theme-text: 210 18% 16%; --theme-muted-text: 212 9% 43%; --theme-accent: 212 92% 43%; --theme-accent-text: 0 0% 100%;
+  --theme-border: 210 18% 87%; --theme-success: 137 66% 32%; --theme-error: 356 72% 46%; --theme-warning: 35 92% 39%;
+  --theme-folder: 212 9% 43%; --theme-shadow: 210 20% 20%; --theme-hover-alpha: 0.10; --theme-destructive-text: 0 0% 100%;
+}
+
+.github-dark {
+  --theme-bg: 216 28% 7%; --theme-sidebar: 216 32% 5%; --theme-panel: 215 21% 11%; --theme-card: 215 21% 11%;
+  --theme-text: 210 17% 82%; --theme-muted-text: 215 14% 57%; --theme-accent: 212 92% 67%; --theme-accent-text: 216 28% 7%;
+  --theme-border: 215 14% 21%; --theme-success: 137 55% 47%; --theme-error: 356 73% 65%; --theme-warning: 40 75% 58%;
+  --theme-folder: 215 14% 57%; --theme-shadow: 216 35% 2%; --theme-hover-alpha: 0.15; --theme-destructive-text: 225 18% 10%;
+}
+
+.vscode-light {
+  --theme-bg: 0 0% 100%; --theme-sidebar: 0 0% 97%; --theme-panel: 0 0% 95%; --theme-card: 0 0% 100%;
+  --theme-text: 0 0% 23%; --theme-muted-text: 0 0% 42%; --theme-accent: 208 100% 36%; --theme-accent-text: 0 0% 100%;
+  --theme-border: 0 0% 84%; --theme-success: 122 39% 35%; --theme-error: 0 62% 45%; --theme-warning: 39 80% 36%;
+  --theme-folder: 0 0% 42%; --theme-shadow: 0 0% 20%; --theme-hover-alpha: 0.10; --theme-destructive-text: 0 0% 100%;
+}
+
+.vscode-dark {
+  --theme-bg: 0 0% 12%; --theme-sidebar: 0 0% 9%; --theme-panel: 0 0% 17%; --theme-card: 0 0% 14%;
+  --theme-text: 0 0% 80%; --theme-muted-text: 0 0% 63%; --theme-accent: 207 100% 58%; --theme-accent-text: 0 0% 8%;
+  --theme-border: 0 0% 25%; --theme-success: 99 41% 60%; --theme-error: 2 85% 70%; --theme-warning: 39 92% 67%;
+  --theme-folder: 0 0% 68%; --theme-shadow: 0 0% 0%; --theme-hover-alpha: 0.15; --theme-destructive-text: 225 18% 10%;
+}
+
+.obsidian-light {
+  --theme-bg: 0 0% 100%; --theme-sidebar: 220 13% 96%; --theme-panel: 0 0% 93%; --theme-card: 0 0% 100%;
+  --theme-text: 210 10% 20%; --theme-muted-text: 218 9% 40%; --theme-accent: 248 82% 69%; --theme-accent-text: 0 0% 100%;
+  --theme-border: 0 0% 84%; --theme-success: 142 55% 38%; --theme-error: 0 70% 48%; --theme-warning: 35 86% 42%;
+  --theme-folder: 218 9% 40%; --theme-shadow: 220 15% 20%; --theme-hover-alpha: 0.10; --theme-destructive-text: 0 0% 100%;
+}
+
+.obsidian-dark {
+  --theme-bg: 0 0% 12%; --theme-sidebar: 0 0% 15%; --theme-panel: 0 0% 20%; --theme-card: 0 0% 16%;
+  --theme-text: 0 0% 86%; --theme-muted-text: 0 0% 65%; --theme-accent: 248 82% 69%; --theme-accent-text: 0 0% 8%;
+  --theme-border: 0 0% 28%; --theme-success: 142 58% 56%; --theme-error: 0 78% 66%; --theme-warning: 39 91% 65%;
+  --theme-folder: 0 0% 72%; --theme-shadow: 0 0% 0%; --theme-hover-alpha: 0.15; --theme-destructive-text: 225 18% 10%;
+}
+
+.solarized-light {
+  --theme-bg: 44 87% 94%; --theme-sidebar: 45 43% 88%; --theme-panel: 45 43% 88%; --theme-card: 44 82% 96%;
+  --theme-hover-surface: 44 82% 96%;
+  --theme-text: 194 14% 40%; --theme-muted-text: 186 8% 55%; --theme-accent: 205 69% 49%; --theme-accent-text: 0 0% 100%;
+  --theme-border: 45 24% 76%; --theme-success: 68 100% 30%; --theme-error: 1 71% 52%; --theme-warning: 45 100% 35%;
+  --theme-folder: 194 14% 40%; --theme-shadow: 44 25% 28%; --theme-hover-alpha: 0.10; --theme-destructive-text: 0 0% 100%;
+}
+
+.solarized-dark {
+  --theme-bg: 192 100% 11%; --theme-sidebar: 192 81% 10%; --theme-panel: 192 72% 14%; --theme-card: 192 74% 13%;
+  --theme-hover-surface: 192 81% 10%;
+  --theme-text: 186 8% 55%; --theme-muted-text: 194 14% 40%; --theme-accent: 205 69% 49%; --theme-accent-text: 192 100% 7%;
+  --theme-border: 192 46% 24%; --theme-success: 68 100% 30%; --theme-error: 1 71% 52%; --theme-warning: 45 100% 35%;
+  --theme-folder: 186 8% 55%; --theme-shadow: 192 100% 4%; --theme-hover-alpha: 0.15; --theme-destructive-text: 225 18% 10%;
+}
+
+.dracula {
+  --theme-bg: 231 15% 18%; --theme-sidebar: 230 16% 15%; --theme-panel: 232 14% 31%; --theme-card: 231 15% 21%;
+  --theme-text: 60 30% 96%; --theme-muted-text: 225 27% 72%; --theme-accent: 265 89% 78%; --theme-accent-text: 231 15% 14%;
+  --theme-border: 232 14% 36%; --theme-success: 135 94% 65%; --theme-error: 0 100% 67%; --theme-warning: 65 92% 76%;
+  --theme-folder: 191 97% 77%; --theme-shadow: 231 25% 6%; --theme-hover-alpha: 0.15; --theme-destructive-text: 225 18% 10%;
+}
+
+.nord {
+  --theme-bg: 220 16% 22%; --theme-sidebar: 220 17% 20%; --theme-panel: 220 16% 28%; --theme-card: 220 16% 25%;
+  --theme-text: 219 28% 88%; --theme-muted-text: 218 27% 72%; --theme-accent: 193 43% 67%; --theme-accent-text: 220 18% 16%;
+  --theme-border: 220 15% 35%; --theme-success: 92 28% 65%; --theme-error: 354 42% 56%; --theme-warning: 40 71% 73%;
+  --theme-folder: 193 43% 67%; --theme-shadow: 220 25% 8%; --theme-hover-alpha: 0.15; --theme-destructive-text: 225 18% 10%;
+}
+
+.rose-pine {
+  --theme-bg: 249 22% 12%; --theme-sidebar: 247 23% 15%; --theme-panel: 248 21% 19%; --theme-card: 247 22% 16%;
+  --theme-text: 245 50% 91%; --theme-muted-text: 248 15% 61%; --theme-accent: 267 57% 78%; --theme-accent-text: 249 22% 10%;
+  --theme-border: 248 17% 28%; --theme-success: 189 43% 73%; --theme-error: 343 76% 68%; --theme-warning: 35 88% 72%;
+  --theme-folder: 2 55% 83%; --theme-shadow: 249 30% 5%; --theme-hover-alpha: 0.15; --theme-destructive-text: 225 18% 10%;
+}
+
+.tokyo-night {
+  --theme-bg: 235 21% 13%; --theme-sidebar: 240 22% 10%; --theme-panel: 230 24% 19%; --theme-card: 235 22% 16%;
+  --theme-text: 229 75% 86%; --theme-muted-text: 228 33% 71%; --theme-accent: 221 88% 72%; --theme-accent-text: 235 24% 10%;
+  --theme-border: 230 22% 27%; --theme-success: 89 51% 61%; --theme-error: 348 92% 71%; --theme-warning: 45 85% 68%;
+  --theme-folder: 194 72% 70%; --theme-shadow: 240 30% 4%; --theme-hover-alpha: 0.15; --theme-destructive-text: 225 18% 10%;
+}
+
+.catppuccin-latte {
+  --theme-bg: 220 23% 95%; --theme-sidebar: 223 16% 91%; --theme-panel: 225 14% 88%; --theme-card: 220 23% 97%;
+  --theme-text: 234 16% 35%; --theme-muted-text: 233 10% 47%; --theme-accent: 266 85% 58%; --theme-accent-text: 0 0% 100%;
+  --theme-border: 228 11% 80%; --theme-success: 109 58% 40%; --theme-error: 347 87% 44%; --theme-warning: 35 77% 49%;
+  --theme-folder: 220 91% 54%; --theme-shadow: 234 18% 24%; --theme-hover-alpha: 0.10; --theme-destructive-text: 0 0% 100%;
+}
+
+.catppuccin-macchiato {
+  --theme-bg: 232 23% 18%; --theme-sidebar: 233 23% 15%; --theme-panel: 230 18% 26%; --theme-card: 232 21% 21%;
+  --theme-text: 227 68% 88%; --theme-muted-text: 228 39% 80%; --theme-accent: 267 83% 80%; --theme-accent-text: 232 25% 12%;
+  --theme-border: 230 16% 34%; --theme-success: 105 48% 72%; --theme-error: 351 74% 73%; --theme-warning: 40 70% 78%;
+  --theme-folder: 220 83% 75%; --theme-shadow: 233 30% 5%; --theme-hover-alpha: 0.15; --theme-destructive-text: 225 18% 10%;
+}
+
+.gruvbox-dark {
+  --theme-bg: 0 0% 16%; --theme-sidebar: 20 7% 12%; --theme-panel: 20 5% 22%; --theme-card: 20 6% 18%;
+  --theme-text: 43 59% 81%; --theme-muted-text: 36 17% 61%; --theme-accent: 42 95% 60%; --theme-accent-text: 20 8% 11%;
+  --theme-border: 20 5% 30%; --theme-success: 61 66% 44%; --theme-error: 6 96% 59%; --theme-warning: 27 99% 55%;
+  --theme-folder: 42 95% 60%; --theme-shadow: 20 20% 3%; --theme-hover-alpha: 0.15; --theme-destructive-text: 225 18% 10%;
+}
+
+.everforest-light {
+  --theme-bg: 48 56% 91%; --theme-sidebar: 48 37% 86%; --theme-panel: 47 38% 84%; --theme-card: 48 60% 94%;
+  --theme-hover-surface: 48 60% 94%;
+  --theme-text: 200 11% 40%; --theme-muted-text: 153 9% 54%; --theme-accent: 66 99% 32%; --theme-accent-text: 0 0% 100%;
+  --theme-border: 47 23% 75%; --theme-success: 99 39% 47%; --theme-error: 2 53% 53%; --theme-warning: 39 74% 49%;
+  --theme-folder: 167 21% 48%; --theme-shadow: 48 20% 24%; --theme-hover-alpha: 0.10; --theme-destructive-text: 0 0% 100%;
+}
+
+.everforest-dark {
+  --theme-bg: 203 13% 20%; --theme-sidebar: 202 13% 18%; --theme-panel: 198 13% 24%; --theme-card: 201 13% 22%;
+  --theme-text: 39 34% 75%; --theme-muted-text: 155 9% 53%; --theme-accent: 82 36% 63%; --theme-accent-text: 203 16% 13%;
+  --theme-border: 198 12% 31%; --theme-success: 82 36% 63%; --theme-error: 2 53% 63%; --theme-warning: 39 74% 65%;
+  --theme-folder: 167 21% 58%; --theme-shadow: 203 25% 5%; --theme-hover-alpha: 0.15; --theme-destructive-text: 225 18% 10%;
+}
+
+/* Syntax palettes use the source themes' established editor colors. These
+   semantic assignments keep source mode and rendered Markdown consistent:
+   comments, keywords, strings, numbers, functions, types, variables, math,
+   and Mermaid diagrams all switch together. */
+.mono-light {
+  --syntax-comment: #5c5c5c; --syntax-keyword: #111111; --syntax-string: #303030; --syntax-number: #454545;
+  --syntax-function: #111111; --syntax-type: #222222; --syntax-variable: #333333; --syntax-punctuation: #111111; --syntax-math: #111111;
+}
+
+.mono-dark {
+  --syntax-comment: #a3a3a3; --syntax-keyword: #f5f5f5; --syntax-string: #d4d4d4; --syntax-number: #bdbdbd;
+  --syntax-function: #ffffff; --syntax-type: #e5e5e5; --syntax-variable: #d4d4d4; --syntax-punctuation: #f5f5f5; --syntax-math: #ffffff;
+}
+
+.github-light {
+  --syntax-comment: #6a737d; --syntax-keyword: #d73a49; --syntax-string: #032f62; --syntax-number: #005cc5;
+  --syntax-function: #6f42c1; --syntax-type: #22863a; --syntax-variable: #e36209; --syntax-punctuation: #24292e; --syntax-math: #6f42c1;
+}
+
+.github-dark {
+  --syntax-comment: #8b949e; --syntax-keyword: #ff7b72; --syntax-string: #a5d6ff; --syntax-number: #79c0ff;
+  --syntax-function: #d2a8ff; --syntax-type: #7ee787; --syntax-variable: #ffa657; --syntax-punctuation: #c9d1d9; --syntax-math: #d2a8ff;
+}
+
+.vscode-light {
+  --syntax-comment: #008000; --syntax-keyword: #0000ff; --syntax-string: #a31515; --syntax-number: #098658;
+  --syntax-function: #795e26; --syntax-type: #267f99; --syntax-variable: #001080; --syntax-punctuation: #393a34; --syntax-math: #267f99;
+}
+
+.vscode-dark {
+  --syntax-comment: #6a9955; --syntax-keyword: #569cd6; --syntax-string: #ce9178; --syntax-number: #b5cea8;
+  --syntax-function: #dcdcaa; --syntax-type: #4ec9b0; --syntax-variable: #9cdcfe; --syntax-punctuation: #d4d4d4; --syntax-math: #4fc1ff;
+}
+
+.obsidian-light {
+  --syntax-comment: #7f7f7f; --syntax-keyword: #d24c68; --syntax-string: #2f7d32; --syntax-number: #b25d00;
+  --syntax-function: #5f49c6; --syntax-type: #0f6f78; --syntax-variable: #6a3ea1; --syntax-punctuation: #3a3a3a; --syntax-math: #7f6df2;
+}
+
+.obsidian-dark {
+  --syntax-comment: #999999; --syntax-keyword: #ff6b8a; --syntax-string: #a8d889; --syntax-number: #ffb86b;
+  --syntax-function: #a997ff; --syntax-type: #72d5df; --syntax-variable: #c7b8ff; --syntax-punctuation: #d8d8d8; --syntax-math: #a997ff;
+}
+
+.solarized-light,
+.solarized-dark {
+  --syntax-keyword: #859900; --syntax-string: #2aa198; --syntax-number: #d33682; --syntax-function: #268bd2;
+  --syntax-type: #b58900; --syntax-variable: #cb4b16; --syntax-punctuation: #657b83; --syntax-math: #6c71c4;
+}
+.solarized-light { --syntax-comment: #93a1a1; }
+.solarized-dark { --syntax-comment: #586e75; }
+
+.dracula {
+  --syntax-comment: #6272a4; --syntax-keyword: #ff79c6; --syntax-string: #f1fa8c; --syntax-number: #bd93f9;
+  --syntax-function: #50fa7b; --syntax-type: #8be9fd; --syntax-variable: #ffb86c; --syntax-punctuation: #f8f8f2; --syntax-math: #bd93f9;
+}
+
+.nord {
+  --syntax-comment: #616e88; --syntax-keyword: #81a1c1; --syntax-string: #a3be8c; --syntax-number: #b48ead;
+  --syntax-function: #88c0d0; --syntax-type: #8fbcbb; --syntax-variable: #d8dee9; --syntax-punctuation: #e5e9f0; --syntax-math: #b48ead;
+}
+
+.rose-pine {
+  --syntax-comment: #6e6a86; --syntax-keyword: #c4a7e7; --syntax-string: #f6c177; --syntax-number: #eb6f92;
+  --syntax-function: #9ccfd8; --syntax-type: #31748f; --syntax-variable: #ebbcba; --syntax-punctuation: #e0def4; --syntax-math: #c4a7e7;
+}
+
+.tokyo-night {
+  --syntax-comment: #565f89; --syntax-keyword: #bb9af7; --syntax-string: #9ece6a; --syntax-number: #ff9e64;
+  --syntax-function: #7aa2f7; --syntax-type: #7dcfff; --syntax-variable: #c0caf5; --syntax-punctuation: #a9b1d6; --syntax-math: #7dcfff;
+}
+
+.catppuccin-latte {
+  --syntax-comment: #9ca0b0; --syntax-keyword: #8839ef; --syntax-string: #40a02b; --syntax-number: #fe640b;
+  --syntax-function: #1e66f5; --syntax-type: #df8e1d; --syntax-variable: #d20f39; --syntax-punctuation: #4c4f69; --syntax-math: #7287fd;
+}
+
+.catppuccin-macchiato {
+  --syntax-comment: #8087a2; --syntax-keyword: #c6a0f6; --syntax-string: #a6da95; --syntax-number: #f5a97f;
+  --syntax-function: #8aadf4; --syntax-type: #eed49f; --syntax-variable: #ed8796; --syntax-punctuation: #cad3f5; --syntax-math: #b7bdf8;
+}
+
+.gruvbox-dark {
+  --syntax-comment: #928374; --syntax-keyword: #fb4934; --syntax-string: #b8bb26; --syntax-number: #d3869b;
+  --syntax-function: #83a598; --syntax-type: #fabd2f; --syntax-variable: #fe8019; --syntax-punctuation: #ebdbb2; --syntax-math: #8ec07c;
+}
+
+.everforest-light {
+  --syntax-comment: #939f91; --syntax-keyword: #f85552; --syntax-string: #8da101; --syntax-number: #df69ba;
+  --syntax-function: #3a94c5; --syntax-type: #dfa000; --syntax-variable: #f57d26; --syntax-punctuation: #5c6a72; --syntax-math: #35a77c;
+}
+
+.everforest-dark {
+  --syntax-comment: #859289; --syntax-keyword: #e67e80; --syntax-string: #a7c080; --syntax-number: #d699b6;
+  --syntax-function: #7fbbb3; --syntax-type: #dbbc7f; --syntax-variable: #e69875; --syntax-punctuation: #d3c6aa; --syntax-math: #7fbbb3;
+}
+
+/* The monochrome presets deliberately neutralize icon colors in addition to
+   the shared text, status, folder, and syntax tokens. Images and user-created
+   drawings retain their original color. */
+.mono-light svg { color: hsl(0 0% 3%) !important; }
+.mono-dark svg { color: hsl(0 0% 96%) !important; }
+.mono-light .marktwin-watermark,
+.mono-dark .marktwin-watermark { opacity: 0.018; }
+
+/* High-contrast Matrix preset. It is intentionally static so the text stays calm and readable. */
+.matrix {
+  --background: 120 20% 4%;
+  --foreground: 120 65% 86%;
+  --muted: 120 20% 12%;
+  --muted-foreground: 120 35% 68%;
+  --popover: 120 18% 7%;
+  --popover-foreground: 120 65% 86%;
+  --card: 120 18% 7%;
+  --card-foreground: 120 65% 86%;
+  --border: 120 32% 42% / 0.18;
+  --input: 120 32% 42% / 0.24;
+  --primary: 120 75% 54%;
+  --primary-foreground: 120 30% 5%;
+  --secondary: 120 24% 15%;
+  --secondary-foreground: 120 65% 86%;
+  --accent: 120 20% 12%;
+  --accent-foreground: 120 65% 86%;
+  --ring: 120 75% 54%;
+  --obsidian-bg: 120 20% 4%;
+  --obsidian-sidebar: 120 18% 7%;
+  --obsidian-panel: 120 20% 10%;
+  --obsidian-panel-hover: 120 75% 54% / 0.16;
+  --obsidian-hover: 120 75% 54% / 0.16;
+  --sidebar-accent: 120 75% 54% / 0.16;
+  --sidebar-accent-foreground: 120 65% 86%;
+  --sidebar-ring: 120 75% 54%;
+  --obsidian-border: 120 32% 42% / 0.18;
+  --obsidian-accent: 120 75% 54%;
+  --obsidian-success: 120 75% 54%;
+  --obsidian-error: 0 72% 62%;
+  --obsidian-warning: 42 92% 62%;
+  --folder-icon: 120 75% 54%;
+  --obsidian-text: 120 65% 86%;
+  --obsidian-text-muted: 120 35% 68%;
+  --obsidian-shadow: 120 42% 2%;
+  --syntax-comment: #579b57;
+  --syntax-keyword: #7cff7c;
+  --syntax-string: #a8f7a8;
+  --syntax-number: #63d663;
+  --syntax-function: #d0ffd0;
+  --syntax-type: #8eea8e;
+  --syntax-variable: #b8f4b8;
+  --syntax-punctuation: #76c876;
+  --syntax-math: #9cff9c;
+}
+
+.matrix *,
+.matrix *::before,
+.matrix *::after {
+  animation: none !important;
+  transition: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Keep status text and file-type icons legible on every light palette. */
+.theme-light :is(.text-red-300, .text-red-400, .text-red-500) {
+  color: hsl(var(--obsidian-error));
+}
+
+.theme-light :is(.text-green-400, .text-green-600, .text-emerald-300) {
+  color: hsl(var(--obsidian-success));
+}
+
+.theme-light :is(.text-amber-200, .text-amber-300, .text-amber-400) {
+  color: hsl(var(--obsidian-warning));
+}
+
+.theme-light .text-blue-400 {
+  color: hsl(var(--obsidian-accent));
+}
+
+.theme-light :is(.text-violet-300, .text-violet-400) {
+  color: hsl(var(--obsidian-accent));
 }

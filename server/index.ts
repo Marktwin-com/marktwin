@@ -1,10 +1,8 @@
+import "dotenv/config";
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
-import { setupVite, serveStatic, log } from "./vite";
-import path from "path";
-import { fileURLToPath } from "url";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+import { serveStatic, log } from "./static";
+import { requestLogLine } from "./request-log";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -21,7 +19,8 @@ app.use((_req, res, next) => {
         "object-src 'none'",
         "frame-ancestors 'none'",
         "img-src 'self' data: blob:",
-        "style-src 'self' 'unsafe-inline'",
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+        "font-src 'self' data: https://fonts.gstatic.com https://esm.sh",
         "script-src 'self'",
         "connect-src 'self' https://api.github.com https://github.com ws: wss:",
       ].join("; "),
@@ -29,47 +28,31 @@ app.use((_req, res, next) => {
   }
   next();
 });
-app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
-
-// Serve static files (images, watermark SVG, etc.) from a public folder (e.g. /public)
-app.use(express.static(path.join(__dirname, "../public")));
-
 // Log only request metadata. Private V1 payloads and signaling messages must never be logged.
 app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
-  next();
-});
-
-app.use((req, res, next) => {
-  const start = Date.now();
-  const path = req.path;
-  res.on("finish", () => {
-    const duration = Date.now() - start;
-    if (path.startsWith("/api")) {
-      log(`${req.method} ${path} ${res.statusCode} in ${duration}ms`);
-    }
-  });
-
+  console.log(requestLogLine(req));
   next();
 });
 
 (async () => {
+
   const server = await registerRoutes(app);
 
-  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
-
-    res.status(status).json({ message });
-    throw err;
-  });
-
   if (app.get("env") === "development") {
+    // Dynamic import: vite.ts is NEVER bundled into the production image.
+    // esbuild only sees ./static in the static import graph.
+    const { setupVite } = await import("./vite.js");
     await setupVite(app, server);
   } else {
     serveStatic(app);
   }
+
+  // No HTTP endpoint accepts private workspace data. Never echo or log error
+  // objects: parser/static errors can contain request bodies or sensitive URLs.
+  app.use((err: { status?: number }, _req: Request, res: Response, _next: NextFunction) => {
+    const status = Number.isInteger(err.status) && err.status! >= 400 && err.status! < 600 ? err.status! : 500;
+    res.status(status).json({ message: status < 500 ? "Invalid request" : "Internal server error" });
+  });
 
   const port = Number.parseInt(process.env.PORT ?? "5001", 10);
   server.listen(port, () => {

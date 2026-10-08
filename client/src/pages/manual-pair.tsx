@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as Y from "yjs";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
-import { base64UrlToBytes, bytesToBase64Url, decodeInvite, deriveDocumentKey, encodeInvite, encryptJson, decryptJson, randomSecret } from "@/lib/private-crypto";
-import { createPeerConnection } from "@/lib/webrtc-config";
+import { Label } from "@/components/ui/label";
+import { base64UrlToBytes, bytesToBase64Url, decodeInvite, deriveDocumentKey, encodeInvite, encryptJson, decryptJson, randomSecret, type DocumentKey } from "@/lib/private-crypto";
+import { createPeerConnection, prepareIceServers } from "@/lib/webrtc-config";
 
 type ManualPacket =
   | { type: "state-request" }
@@ -57,19 +58,24 @@ export default function ManualPairPage() {
   const ytext = useMemo(() => ydoc.getText("markdown"), [ydoc]);
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const channelRef = useRef<RTCDataChannel | null>(null);
-  const keyRef = useRef<CryptoKey | null>(null);
+  const keyRef = useRef<DocumentKey | null>(null);
   const [content, setContent] = useState("");
   const [offer, setOffer] = useState("");
   const [incomingOffer, setIncomingOffer] = useState("");
   const [answer, setAnswer] = useState("");
   const [incomingAnswer, setIncomingAnswer] = useState("");
-  const [status, setStatus] = useState("This isolated transport lab does not use Marktwin signaling.");
+  const [status, setStatus] = useState("Manual pairing does not use Marktwin signaling.");
+  const reportError = (error: unknown) => setStatus(error instanceof Error ? error.message : "Manual pairing failed.");
 
   useEffect(() => {
     const observer = () => setContent(ytext.toString());
     const updateHandler = async (update: Uint8Array, origin: unknown) => {
       if (origin === "remote" || !keyRef.current || channelRef.current?.readyState !== "open") return;
-      channelRef.current.send(await encryptJson(keyRef.current, { type: "y-update", update: bytesToBase64Url(update) }));
+      try {
+        channelRef.current.send(await encryptJson(keyRef.current, { type: "y-update", update: bytesToBase64Url(update) }));
+      } catch (error) {
+        reportError(error);
+      }
     };
     ytext.observe(observer);
     ydoc.on("update", updateHandler);
@@ -82,24 +88,33 @@ export default function ManualPairPage() {
   const setupChannel = (channel: RTCDataChannel) => {
     channelRef.current = channel;
     channel.onopen = async () => {
-      setStatus("Manual WebRTC connection open.");
-      if (keyRef.current) {
-        channel.send(await encryptJson(keyRef.current, { type: "y-update", update: bytesToBase64Url(Y.encodeStateAsUpdate(ydoc)) }));
+      try {
+        setStatus("Manual WebRTC connection open.");
+        if (keyRef.current) {
+          channel.send(await encryptJson(keyRef.current, { type: "y-update", update: bytesToBase64Url(Y.encodeStateAsUpdate(ydoc)) }));
+        }
+      } catch (error) {
+        reportError(error);
       }
     };
     channel.onmessage = async (event) => {
-      if (!keyRef.current) return;
-      const payload = await decryptJson<ManualPacket>(keyRef.current, event.data);
-      if (payload.type === "state-request") {
-        channel.send(await encryptJson(keyRef.current, { type: "y-update", update: bytesToBase64Url(Y.encodeStateAsUpdate(ydoc)) }));
-      }
-      if (payload.type === "y-update") {
-        Y.applyUpdate(ydoc, base64UrlToBytes(payload.update), "remote");
+      try {
+        if (!keyRef.current) return;
+        const payload = await decryptJson<ManualPacket>(keyRef.current, event.data);
+        if (payload.type === "state-request") {
+          channel.send(await encryptJson(keyRef.current, { type: "y-update", update: bytesToBase64Url(Y.encodeStateAsUpdate(ydoc)) }));
+        }
+        if (payload.type === "y-update") {
+          Y.applyUpdate(ydoc, base64UrlToBytes(payload.update), "remote");
+        }
+      } catch (error) {
+        reportError(error);
       }
     };
   };
 
   const createOwnerOffer = async () => {
+    await prepareIceServers();
     const documentSecret = randomSecret();
     keyRef.current = await deriveDocumentKey(documentSecret);
     const pc = createPeerConnection();
@@ -112,6 +127,7 @@ export default function ManualPairPage() {
   };
 
   const createCollaboratorAnswer = async () => {
+    await prepareIceServers();
     const parsed = decodeInvite<ManualOffer>(incomingOffer);
     keyRef.current = await deriveDocumentKey(parsed.documentSecret);
     const pc = createPeerConnection();
@@ -135,41 +151,44 @@ export default function ManualPairPage() {
     <div className="min-h-screen bg-[hsl(var(--obsidian-bg))] text-[hsl(var(--obsidian-text))] p-4">
       <div className="grid grid-cols-1 xl:grid-cols-[380px_1fr] gap-4">
         <section className="space-y-4">
-          <div className="rounded-md border border-amber-500/50 bg-amber-950/30 p-3 text-sm text-amber-100">
-            Technical demo only: this page pairs one temporary Yjs text document. It is not connected to an agent workspace, its files, discussion, roles, or Changes review.
-          </div>
           <Card className="bg-[hsl(var(--obsidian-panel))] border-[hsl(var(--obsidian-border))]">
             <CardHeader>
-              <CardTitle>Manual WebRTC transport lab</CardTitle>
-              <CardDescription className="text-gray-400">{status}</CardDescription>
+              <h1 className="text-2xl font-semibold leading-none tracking-tight">Manual Pairing</h1>
+              <CardDescription className="text-muted-foreground">{status}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              <Button onClick={createOwnerOffer} className="w-full">Owner: Create Offer</Button>
-              <Textarea readOnly value={offer} placeholder="Owner offer appears here" className="min-h-28 bg-[hsl(var(--obsidian-bg))]" />
-              <Textarea value={incomingAnswer} onChange={(event) => setIncomingAnswer(event.target.value)} placeholder="Owner pastes collaborator answer here" className="min-h-28 bg-[hsl(var(--obsidian-bg))]" />
-              <Button onClick={acceptAnswer} disabled={!incomingAnswer} variant="outline" className="w-full">Owner: Accept Answer</Button>
+              <Button onClick={() => void createOwnerOffer().catch(reportError)} className="w-full">Owner: Create Offer</Button>
+              <Label htmlFor="owner-offer">Owner offer</Label>
+              <Textarea id="owner-offer" readOnly value={offer} placeholder="Owner offer appears here" className="min-h-28 bg-[hsl(var(--obsidian-bg))]" />
+              <Label htmlFor="owner-answer">Collaborator answer for the owner</Label>
+              <Textarea id="owner-answer" value={incomingAnswer} onChange={(event) => setIncomingAnswer(event.target.value)} placeholder="Owner pastes collaborator answer here" className="min-h-28 bg-[hsl(var(--obsidian-bg))]" />
+              <Button onClick={() => void acceptAnswer().catch(reportError)} disabled={!incomingAnswer} variant="outline" className="w-full">Owner: Accept Answer</Button>
             </CardContent>
           </Card>
 
           <Card className="bg-[hsl(var(--obsidian-panel))] border-[hsl(var(--obsidian-border))]">
             <CardHeader>
-              <CardTitle>Collaborator</CardTitle>
+              <h2 className="text-2xl font-semibold leading-none tracking-tight">Collaborator</h2>
             </CardHeader>
             <CardContent className="space-y-3">
-              <Textarea value={incomingOffer} onChange={(event) => setIncomingOffer(event.target.value)} placeholder="Collaborator pastes owner offer here" className="min-h-28 bg-[hsl(var(--obsidian-bg))]" />
-              <Button onClick={createCollaboratorAnswer} disabled={!incomingOffer} className="w-full">Collaborator: Create Answer</Button>
-              <Textarea readOnly value={answer} placeholder="Collaborator answer appears here" className="min-h-28 bg-[hsl(var(--obsidian-bg))]" />
+              <Label htmlFor="collaborator-offer">Owner offer for the collaborator</Label>
+              <Textarea id="collaborator-offer" value={incomingOffer} onChange={(event) => setIncomingOffer(event.target.value)} placeholder="Collaborator pastes owner offer here" className="min-h-28 bg-[hsl(var(--obsidian-bg))]" />
+              <Button onClick={() => void createCollaboratorAnswer().catch(reportError)} disabled={!incomingOffer} className="w-full">Collaborator: Create Answer</Button>
+              <Label htmlFor="collaborator-answer">Collaborator answer</Label>
+              <Textarea id="collaborator-answer" readOnly value={answer} placeholder="Collaborator answer appears here" className="min-h-28 bg-[hsl(var(--obsidian-bg))]" />
             </CardContent>
           </Card>
         </section>
 
         <Card className="bg-[hsl(var(--obsidian-panel))] border-[hsl(var(--obsidian-border))]">
           <CardHeader>
-            <CardTitle>Temporary demo document</CardTitle>
-            <CardDescription className="text-gray-400">Edits travel only over the manual WebRTC connection.</CardDescription>
+            <h2 className="text-2xl font-semibold leading-none tracking-tight">Encrypted Manual Document</h2>
+            <CardDescription className="text-muted-foreground">Edits travel only over the manual WebRTC connection.</CardDescription>
           </CardHeader>
           <CardContent>
+            <Label className="sr-only" htmlFor="manual-document">Encrypted collaborative document</Label>
             <Textarea
+              id="manual-document"
               value={content}
               onChange={(event) => replaceYText(ytext, event.target.value)}
               className="min-h-[74vh] font-mono bg-[hsl(var(--obsidian-bg))] border-[hsl(var(--obsidian-border))]"

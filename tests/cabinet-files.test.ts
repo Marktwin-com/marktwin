@@ -26,7 +26,7 @@ import {
   renameNote,
   scopeHasUnsyncedChanges,
 } from "../client/src/lib/cabinet-files.ts";
-import { defaultRootScopes, type GitHubRootScope } from "../client/src/lib/browser-github.ts";
+import { defaultRootScopes, type GitHubRootScope } from "../client/src/lib/workspace-github.ts";
 
 test("path normalization rejects traversal and normalizes Markdown names", () => {
   assert.equal(normalizeRepositoryPath("/.agents/rules/"), ".agents/rules");
@@ -34,18 +34,18 @@ test("path normalization rejects traversal and normalizes Markdown names", () =>
   assert.equal(normalizeMarkdownFilename("SKILL"), "SKILL.md");
   assert.throws(() => normalizeRepositoryPath(".agents/../secrets"), /cannot contain/);
   assert.throws(() => normalizeMarkdownFilename("nested/file.md"), /slashes/);
-  assert.throws(() => normalizeMarkdownFilename("rules.txt"), /Markdown/);
+  assert.equal(normalizeMarkdownFilename("rules.txt"), "rules.txt");
   assert.throws(() => joinFolderPath(".agents", "nested/folder"), /slashes/);
 });
 
-test(".agents is the only default root scope", () => {
+test(".agents is preferred and main path is the fallback root scope", () => {
   const scopes: GitHubRootScope[] = [
     { key: "/", label: "Main path", kind: "root", sha: "root" },
     { key: "docs", label: "docs", kind: "folder", sha: "docs" },
     { key: ".agents", label: ".agents", kind: "folder", sha: "agents" },
   ];
   assert.deepEqual(defaultRootScopes(scopes), [".agents"]);
-  assert.deepEqual(defaultRootScopes(scopes.filter((scope) => scope.key !== ".agents")), []);
+  assert.deepEqual(defaultRootScopes(scopes.filter((scope) => scope.key !== ".agents")), ["/"]);
 });
 
 test("empty and non-empty new Markdown files are staged explicitly", () => {
@@ -117,7 +117,7 @@ test("dirty scopes cannot be unloaded", () => {
   const doc = new Y.Doc();
   const id = addMarkdownNote(doc, { filename: "AGENTS.md", path: ".agents" });
   assert.equal(scopeHasUnsyncedChanges(doc, ".agents"), true);
-  assert.equal(scopeHasUnsyncedChanges(doc, "/"), false);
+  assert.equal(scopeHasUnsyncedChanges(doc, "/"), true);
   assert.equal(fullNotePath(readCabinetNotes(doc).find((note) => note.id === id)!), ".agents/AGENTS.md");
   assert.throws(() => removeCleanScope(doc, ".agents"), /Sync or discard/);
 });

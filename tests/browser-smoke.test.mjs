@@ -1,397 +1,197 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawn } from "node:child_process";
+import { createServer } from "node:net";
 import test from "node:test";
 import puppeteer from "puppeteer";
+import { createGitHubFixture } from "./fixtures/github.mjs";
 
 async function availablePort() {
-  return new Promise((resolve, reject) => {
-    const server = createServer();
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      const port = typeof address === "object" && address ? address.port : 0;
-      server.close((error) => error ? reject(error) : resolve(port));
-    });
-  });
+  return new Promise((resolve, reject) => { const server = createServer(); server.once("error", reject); server.listen(0, "127.0.0.1", () => { const port = server.address().port; server.close(error => error ? reject(error) : resolve(port)); }); });
+}
+async function bodyIncludes(page, text, timeout = 20000) {
+  try { await page.waitForFunction(text => document.body.innerText.includes(text), { timeout }, text); }
+  catch (error) { throw new Error(`${error.message}\nExpected: ${text}\nBody: ${await page.evaluate(() => document.body.innerText)}`); }
+}
+async function clickText(page, text) {
+  await page.waitForFunction(text => [...document.querySelectorAll('button,[role="menuitem"]')].some(node => node.textContent.trim() === text && node.getClientRects().length), {}, text);
+  await page.evaluate(text => [...document.querySelectorAll('button,[role="menuitem"]')].find(node => node.textContent.trim() === text && node.getClientRects().length).click(), text);
+}
+async function sourceAppend(page, text) {
+  await page.waitForSelector('.cm-content[contenteditable="true"]');
+  await page.click('.cm-content[contenteditable="true"]');
+  await page.keyboard.down(process.platform === "darwin" ? "Meta" : "Control");
+  await page.keyboard.press(process.platform === "darwin" ? "ArrowDown" : "End");
+  await page.keyboard.up(process.platform === "darwin" ? "Meta" : "Control");
+  await page.keyboard.type(text);
 }
 
-async function waitForServer(url, child, logs) {
-  for (let attempt = 0; attempt < 120; attempt += 1) {
-    if (child.exitCode !== null) throw new Error(`Development server exited early.\n${logs.join("")}`);
-    try {
-      const response = await fetch(url);
-      if (response.ok) return;
-    } catch {
-      // Vite is still starting.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  throw new Error(`Development server did not become ready.\n${logs.join("")}`);
-}
-
-async function waitForBodyText(page, expected, timeout = 15_000) {
-  const deadline = Date.now() + timeout;
-  while (Date.now() < deadline) {
-    const body = await page.evaluate(() => document.body.innerText);
-    if (expected.every((value) => body.includes(value))) return body;
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  throw new Error(`Timed out waiting for: ${expected.join(", ")}\n${await page.evaluate(() => document.body.innerText)}`);
-}
-
-async function waitForBodyMatch(page, pattern, timeout = 15_000) {
-  const deadline = Date.now() + timeout;
-  while (Date.now() < deadline) {
-    const body = await page.evaluate(() => document.body.innerText);
-    if (pattern.test(body)) return body;
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  throw new Error(`Timed out waiting for ${pattern}:\n${await page.evaluate(() => document.body.innerText)}`);
-}
-
-function repositoryResponse() {
-  return {
-    name: "rules",
-    full_name: "acme/rules",
-    owner: { login: "acme" },
-    default_branch: "main",
-    private: true,
-  };
-}
-
-test("agent workspace UI stages Markdown and preserves conflicts without legacy API calls", { timeout: 60_000 }, async () => {
-  const port = await availablePort();
-  const origin = `http://127.0.0.1:${port}`;
-  const serverLogs = [];
-  const child = spawn(process.execPath, ["--import", "tsx", "server/index.ts"], {
-    cwd: process.cwd(),
-    env: { ...process.env, NODE_ENV: "development", PORT: String(port) },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  child.stdout.on("data", (chunk) => serverLogs.push(String(chunk)));
-  child.stderr.on("data", (chunk) => serverLogs.push(String(chunk)));
-
+test("account-free workspace: upgrade, formats, checkpoint, recovery, collaboration and privacy", { timeout: 180000 }, async () => {
+  const port = await availablePort(); const origin = `http://127.0.0.1:${port}`;
+  const logs = [];
+  const child = spawn(process.execPath, ["--import", "tsx", "server/index.ts"], { cwd: process.cwd(), env: { ...process.env, NODE_ENV: "development", PORT: String(port), DATABASE_URL: "" }, stdio: ["ignore", "pipe", "pipe"] });
+  child.stdout.on("data", chunk => logs.push(String(chunk))); child.stderr.on("data", chunk => logs.push(String(chunk)));
   let browser;
-  const tempDirectory = await mkdtemp(join(tmpdir(), "marktwin-smoke-"));
-  const importedFile = join(tempDirectory, "IMPORTED.md");
-  await writeFile(importedFile, "# Imported\n", "utf8");
-
+  const errors = []; const forbidden = []; const fixture = createGitHubFixture();
   try {
-    await waitForServer(origin, child, serverLogs);
-    assert.equal((await fetch(`${origin}/api/pdf/test`)).status, 404);
-    assert.equal((await fetch(`${origin}/api/pdf/generate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ markdown: "private" }) })).status, 404);
-    browser = await puppeteer.launch({ headless: true, args: ["--no-sandbox"] });
-    const page = await browser.newPage();
-    page.setDefaultTimeout(10_000);
-    const forbiddenApiCalls = [];
-    const githubCalls = [];
-    const pageErrors = [];
-    let syncPrepared = false;
-    let conflictBranch = "";
-
-    page.on("pageerror", (error) => pageErrors.push(error.message));
-    await page.setRequestInterception(true);
-    page.on("request", async (request) => {
-      const url = new URL(request.url());
-      const method = request.method();
-      if (url.origin === origin && /^\/api\/(?:vaults|notes|user\/preferences)/.test(url.pathname)) {
-        forbiddenApiCalls.push(`${method} ${url.pathname}`);
-      }
-      if (url.origin !== "https://api.github.com") {
-        await request.continue();
-        return;
-      }
-      githubCalls.push(`${method} ${url.pathname}${url.search}`);
-
-      const respond = (body, status = 200) => request.respond({
-        status,
-        headers: {
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Headers": "Authorization, Content-Type, X-GitHub-Api-Version",
-          "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, OPTIONS",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(body),
+    for (let i = 0; i < 150; i++) { try { if ((await fetch(origin)).ok) break; } catch {} if (child.exitCode !== null) throw new Error(logs.join("")); await new Promise(resolve => setTimeout(resolve, 100)); }
+    for (const path of ["/api/auth/me", "/api/repos", "/api/pdf/test", "/api/analytics/events"]) assert.equal((await fetch(origin + path)).status, 404);
+    browser = await puppeteer.launch({ headless: true, args: ["--no-sandbox", "--disable-dev-shm-usage"] });
+    const context = await browser.createBrowserContext();
+    async function setup(page) {
+      page.setDefaultTimeout(20000);
+      page.on("dialog", dialog => void dialog.accept());
+      page.on("pageerror", error => errors.push(error.message));
+      await page.setRequestInterception(true);
+      page.on("request", async request => {
+        const url = new URL(request.url());
+        if (url.origin !== "https://api.github.com" && url.pathname.includes("private-image-sentinel")) forbidden.push(request.url());
+        if (url.origin === origin && (url.pathname.startsWith("/api/") || request.postData()?.includes("test-token"))) forbidden.push(`${request.method()} ${url.pathname}`);
+        try { if (!(await fixture.handle(request))) await request.continue(); } catch (error) { errors.push(error.message); await request.abort().catch(() => {}); }
       });
-      const path = url.pathname;
-      if (method === "OPTIONS") return void await respond({}, 204);
-      if (path === "/repos/acme/rules") return void await respond(repositoryResponse());
-      if (path === "/repos/acme/rules/branches/main") {
-        return void await respond({ name: "main", commit: { sha: "commit-1" } });
-      }
-      if (path.startsWith("/repos/acme/rules/git/ref/heads/")) {
-        const sha = syncPrepared && path.endsWith("/main") ? "remote-commit" : path.endsWith("/main") ? "commit-1" : "commit-2";
-        return void await respond({ object: { sha } });
-      }
-      if (method === "GET" && path.startsWith("/repos/acme/rules/git/commits/")) {
-        return void await respond({ tree: { sha: path.endsWith("commit-1") ? "tree-1" : "tree-2" } });
-      }
-      if (method === "GET" && path === "/repos/acme/rules/git/trees/tree-1") {
-        return void await respond({ sha: "tree-1", truncated: false, tree: [
-          { path: ".agents", type: "tree", sha: "agents-tree-1" },
-          { path: "docs", type: "tree", sha: "docs-tree" },
-          { path: "README.md", type: "blob", sha: "readme-sha" },
-          { path: "diagram.svg", type: "blob", sha: "svg-sha" },
-        ] });
-      }
-      if (method === "GET" && path === "/repos/acme/rules/git/trees/tree-2") {
-        return void await respond({ sha: "tree-2", truncated: false, tree: [
-          { path: ".agents", type: "tree", sha: "agents-tree-2" },
-          { path: "docs", type: "tree", sha: "docs-tree" },
-          { path: "README.md", type: "blob", sha: "readme-sha" },
-        ] });
-      }
-      if (method === "GET" && path.endsWith("/git/trees/agents-tree-1")) {
-        return void await respond({ sha: "agents-tree-1", truncated: false, tree: [
-          { path: "AGENTS.md", type: "blob", sha: "agents-sha" },
-        ] });
-      }
-      if (method === "GET" && path.endsWith("/git/trees/agents-tree-2")) {
-        return void await respond({ sha: "agents-tree-2", truncated: false, tree: [
-          { path: "AGENTS.md", type: "blob", sha: "agents-sha" },
-          { path: "IMPORTED.md", type: "blob", sha: "import-sha" },
-          { path: "NEW.md", type: "blob", sha: "new-sha" },
-        ] });
-      }
-      if (method === "GET" && path.startsWith("/repos/acme/rules/contents/")) {
-        const name = decodeURIComponent(path.split("/").at(-1));
-        const content = name === "AGENTS.md" ? "# Agent rules\n" : name === "IMPORTED.md" ? "# Imported\n" : "";
-        return void await respond({
-          name,
-          path: `.agents/${name}`,
-          sha: `${name.toLowerCase()}-sha`,
-          encoding: "base64",
-          content: Buffer.from(content).toString("base64"),
-        });
-      }
-      if (method === "POST" && path.endsWith("/git/trees")) return void await respond({ sha: "tree-2" }, 201);
-      if (method === "POST" && path.endsWith("/git/commits")) {
-        syncPrepared = true;
-        return void await respond({ sha: "commit-2" }, 201);
-      }
-      if (method === "PATCH" && path.includes("/git/refs/heads/main")) {
-        return void await respond({ message: "Reference update failed" }, 422);
-      }
-      if (method === "POST" && path.endsWith("/git/refs")) {
-        const body = JSON.parse(request.postData() || "{}");
-        conflictBranch = String(body.ref || "").replace("refs/heads/", "");
-        return void await respond({ ref: body.ref }, 201);
-      }
-      return void await respond({ message: `Unhandled smoke request: ${method} ${path}` }, 500);
-    });
-
+    }
+    console.log("browser: connected");
+    const page = await context.newPage(); await setup(page);
+    await page.setViewport({ width: 1440, height: 1000 });
     await page.evaluateOnNewDocument(() => {
-      localStorage.setItem("marktwin:saved-repos", JSON.stringify([{
-        id: 101,
-        displayName: "acme/rules",
-        repoFullName: "acme/rules",
-        defaultBranch: "main",
-        createdAt: new Date().toISOString(),
-      }]));
+      if (!localStorage.getItem("smoke-seeded")) {
+        localStorage.setItem("marktwin:saved-repos", JSON.stringify([{ id: 101, displayName: "acme/rules", repoFullName: "acme/rules", defaultBranch: "main", selectedRootScopes: [".agents"], createdAt: "2026-01-01" }]));
+        localStorage.setItem("marktwin-editor-preferences", JSON.stringify({ defaultMarkdownMode: "source", keepOfflineDrafts: true }));
+        localStorage.setItem("smoke-seeded", "1");
+      }
       sessionStorage.setItem("gh-token-101", "test-token");
     });
+    console.log("browser: cabinets");
+    await page.goto(origin, { waitUntil: "domcontentloaded" });
+    await bodyIncludes(page, "acme/rules");
+    assert.equal(await page.$('a[href="/signin"]'), null);
+    const upgraded = await page.evaluate(() => JSON.parse(localStorage.getItem("marktwin:saved-repos"))[0]);
+    assert.equal(upgraded.id, 101); assert.deepEqual(upgraded.selectedRootScopes, [".agents"]); assert.equal(upgraded.autoSync, false);
     await page.goto(`${origin}/cabinet/101`, { waitUntil: "domcontentloaded" });
-    try {
-      await waitForBodyText(page, ["AGENTS.md", "Folders (1)"], 15_000);
-    } catch (error) {
-      const body = await page.evaluate(() => document.body.innerText);
-      throw new Error(`${error.message}\nBody:\n${body}\nGitHub calls:\n${githubCalls.join("\n")}\nPage errors:\n${pageErrors.join("\n")}`);
-    }
-    assert.equal((await page.evaluate(() => document.body.innerText)).includes("README.md"), false);
+    await bodyIncludes(page, "AGENTS.md");
+    await page.click('[aria-label="Open AGENTS.md"]');
+    await bodyIncludes(page, "Keep private work in the browser.");
+    assert.equal(await page.$('[aria-label="Open README.md"]'), null);
+    await page.click('[aria-label="Change editor view"]');
+    await clickText(page, "Read-only preview");
+    await page.waitForSelector('.marktwin-markdown .katex');
+    await page.waitForSelector('.marktwin-mermaid svg', { timeout: 30000 });
+    assert.equal(await page.$$eval('.marktwin-markdown img[src]', images => images.length), 0);
+    await page.click('[aria-label="Change editor view"]');
+    await clickText(page, "Source editor");
+    await page.click('[aria-label="Open board.canvas"]');
+    await page.waitForFunction(() => [...document.querySelectorAll("textarea")].some(node => node.value.includes("Canvas smoke test")));
+    await page.click('textarea');
+    await page.keyboard.type(" — edited in the browser");
+    await page.click('[aria-label="Open sketch.excalidraw"]');
+    await page.waitForSelector('.excalidraw canvas');
+    await page.click('.excalidraw canvas');
+    await page.keyboard.press('r');
+    const drawingBounds = await page.$eval('.excalidraw canvas', canvas => { const r = canvas.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; });
+    await page.mouse.move(drawingBounds.x + drawingBounds.width / 2, drawingBounds.y + drawingBounds.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(drawingBounds.x + drawingBounds.width / 2 + 130, drawingBounds.y + drawingBounds.height / 2 + 90, { steps: 10 });
+    await page.mouse.up();
+    await page.screenshot({ path: join(tmpdir(), 'marktwin-oss-drawing.png') });
+    await page.click('[aria-label="Open AGENTS.md"]');
+    console.log("browser: formats loaded");
+    await sourceAppend(page, "\nLocal checkpoint edit.");
+    await page.waitForSelector('[aria-label="Unsynced changes"]');
+    await page.click('[aria-label="Unsynced changes"]');
+    await bodyIncludes(page, "Review changes before publishing");
+    await page.waitForFunction(() => [...document.querySelectorAll('[role="dialog"] button')].some(node => /^Checkpoint .* to GitHub$/.test(node.textContent.trim())));
+    await page.evaluate(() => [...document.querySelectorAll('[role="dialog"] button')].find(node => /^Checkpoint .* to GitHub$/.test(node.textContent.trim())).click());
+    await page.waitForFunction(() => !document.querySelector('[role="dialog"]'));
+    await page.waitForSelector('[aria-label="Synced"]');
+    assert.equal(fixture.commits.length, 1);
+    assert.match(fixture.snapshots.get(fixture.branches.get("main")).get(".agents/AGENTS.md"), /Local checkpoint edit/);
 
-    const folderButtons = await page.$$("button");
-    let folderTrigger;
-    for (const button of folderButtons) {
-      if ((await button.evaluate((element) => element.textContent || "")).includes("Folders (1)")) {
-        folderTrigger = button;
-        break;
-      }
-    }
-    assert.ok(folderTrigger, "Folder selector was not found.");
-    await folderTrigger.click();
-    await waitForBodyText(page, ["Main path", "docs"], 10_000);
+    console.log("browser: checkpoint succeeded");
+    const committed = fixture.snapshots.get(fixture.branches.get("main"));
+    assert.match(committed.get(".agents/board.canvas"), /edited in the browser/);
+    assert.ok(JSON.parse(committed.get(".agents/sketch.excalidraw")).elements.length > 0);
+    fixture.setFailPublication(true);
+    await sourceAppend(page, "\nDraft survives a failed checkpoint.");
+    await page.click('[aria-label="Unsynced changes"]');
+    await page.waitForFunction(() => [...document.querySelectorAll('[role="dialog"] button')].some(node => /^Checkpoint .* to GitHub$/.test(node.textContent.trim())));
+    await page.evaluate(() => [...document.querySelectorAll('[role="dialog"] button')].find(node => /^Checkpoint .* to GitHub$/.test(node.textContent.trim())).click());
+    await bodyIncludes(page, "Simulated GitHub outage");
+    fixture.setFailPublication(false);
     await page.keyboard.press("Escape");
-
-    await page.$eval('button[title^="New Markdown"]', (button) => button.click());
-    await page.waitForSelector('input[placeholder="Enter file name..."]');
-    await page.type('input[placeholder="Enter file name..."]', "NEW.md");
-    await page.keyboard.press("Enter");
-    await waitForBodyText(page, ["NEW.md"]);
-
-    const fileChooserPromise = page.waitForFileChooser();
-    await page.click('button[title^="Import Markdown"]');
-    const fileChooser = await fileChooserPromise;
-    await fileChooser.accept([importedFile]);
-    await waitForBodyText(page, ["IMPORTED.md"]);
-
-    await page.click('button[title="Review staged changes"]');
-    await waitForBodyText(page, ["Review changes before publishing"]);
-    await page.evaluate(() => {
-      const button = Array.from(document.querySelectorAll("button")).find((candidate) => /^Sync \d+ changes?$/.test(candidate.textContent?.trim() || ""));
-      if (!(button instanceof HTMLButtonElement)) throw new Error("Final Sync button not found");
-      button.click();
+    await page.waitForFunction(async () => {
+      const db = await new Promise((resolve, reject) => { const request = indexedDB.open("marktwin-workspace-recovery", 1); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
+      const records = await new Promise((resolve, reject) => { const request = db.transaction("drafts").objectStore("drafts").getAll(); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
+      db.close(); return records.some(record => record.repoId === 101 && record.dirty);
     });
-    await waitForBodyText(page, ["Conflict detected"]);
-    assert.match(conflictBranch, /^main-marktwin-\d{8}-\d{6}$/);
-    assert.equal((await page.evaluate(() => document.body.innerText)).includes(conflictBranch), true);
-    await page.$eval('button[aria-label="Dismiss notification"]', (button) => button.click());
+    console.log("browser: failed checkpoint retained; reload");
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await bodyIncludes(page, "Local draft", 20000);
+    // Recovery is an explicit choice when the saved draft differs from GitHub.
+    const recoveryButtons = await page.$$eval('button', nodes => nodes.map(node => node.textContent.trim()));
+    const recover = recoveryButtons.find(text => /recover.*draft|restore.*draft|open.*draft/i.test(text));
+    if (recover) await clickText(page, recover);
+    await bodyIncludes(page, "Draft survives a failed checkpoint.");
 
-    const shareButtonState = await page.$eval('button[aria-label="Start sharing session"]', (button) => ({ disabled: button.disabled, html: button.outerHTML }));
-    assert.equal(shareButtonState.disabled, false, shareButtonState.html);
-    await page.$eval('button[aria-label="Start sharing session"]', (button) => button.click());
-    await page.waitForFunction(() => document.querySelector('#share-Edit-link') || document.body.innerText.includes("Failed to start sharing"), { timeout: 4_000 });
-    if (await page.evaluate(() => document.body.innerText.includes("Failed to start sharing"))) {
-      throw new Error(await page.evaluate(() => document.body.innerText));
+    console.log("browser: recovery restored");
+    await page.click('[aria-label="More Cabinet actions"]');
+    await clickText(page, "Start sharing session");
+    await page.waitForFunction(() => document.querySelector('#share-edit')?.value.includes('/join#'));
+    const links = await page.evaluate(() => ({ edit: document.querySelector('#share-edit').value, view: document.querySelector('#share-view').value }));
+    assert.notEqual(links.edit, links.view);
+    await page.keyboard.press("Escape");
+    const editContext = await browser.createBrowserContext(); const viewContext = await browser.createBrowserContext();
+    const editPage = await editContext.newPage(); const viewPage = await viewContext.newPage();
+    for (const peer of [editPage, viewPage]) { await setup(peer); await peer.setViewport({ width: 1440, height: 1000 }); await peer.evaluateOnNewDocument(() => localStorage.setItem("marktwin-editor-preferences", JSON.stringify({ defaultMarkdownMode: "source" }))); }
+    console.log("browser: joining peers");
+    await Promise.all([editPage.goto(links.edit), viewPage.goto(links.view)]);
+    await Promise.all([bodyIncludes(editPage, "AGENTS.md", 30000), bodyIncludes(viewPage, "AGENTS.md", 30000)]);
+    for (const peer of [editPage, viewPage]) await peer.click('[aria-label="Open AGENTS.md"]');
+    await sourceAppend(editPage, "\nLive editor change.");
+    await Promise.all([bodyIncludes(page, "Live editor change."), bodyIncludes(viewPage, "Live editor change.")]);
+    assert.equal(await viewPage.$('.cm-content[contenteditable="true"]'), null);
+    assert.equal(await editPage.$('[aria-label="Unsynced changes"]'), null);
+    assert.equal(await viewPage.$('[aria-label="Unsynced changes"]'), null);
+
+    for (const peer of [page, editPage, viewPage]) await peer.click('[aria-label="Toggle Chat"]');
+    await viewPage.type('[aria-label="Chat message"]', 'Viewer discussion stays encrypted.');
+    await viewPage.click('[aria-label="Send chat message"]');
+    await Promise.all([bodyIncludes(page, 'Viewer discussion stays encrypted.'), bodyIncludes(editPage, 'Viewer discussion stays encrypted.')]);
+    await editPage.reload({ waitUntil: 'domcontentloaded' });
+    await bodyIncludes(editPage, 'Connected with edit access', 30000);
+    await editPage.click('[aria-label="Open AGENTS.md"]');
+    await sourceAppend(editPage, "\nReconnected editor change.");
+    await Promise.all([bodyIncludes(page, 'Reconnected editor change.'), bodyIncludes(viewPage, 'Reconnected editor change.')]);
+    console.log("browser: collaboration, viewer chat and reconnect passed");
+    for (const width of [390, 768, 1440]) {
+      await page.setViewport({ width, height: 900 });
+      await page.waitForFunction(() => document.documentElement.scrollWidth <= window.innerWidth);
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, `overflow at ${width}`);
     }
-    try {
-      await page.waitForFunction(() => document.querySelector('#share-Edit-link')?.value.includes('/join#'), { timeout: 8_000 });
-    } catch (error) {
-      const body = await page.evaluate(() => document.body.innerText);
-      throw new Error(`${error.message}\nBody after Share:\n${body}\nPage errors:\n${pageErrors.join("\n")}`);
-    }
-    const initialLinks = await page.evaluate(() => ({
-      edit: document.querySelector('#share-Edit-link')?.value || "",
-      view: document.querySelector('#share-View-only-link')?.value || "",
-    }));
-    assert.notEqual(initialLinks.edit, initialLinks.view);
-    await page.evaluate(() => {
-      const dialogs = Array.from(document.querySelectorAll('[role="dialog"]'));
-      const close = dialogs.flatMap((dialog) => Array.from(dialog.querySelectorAll("button"))).reverse().find((button) => button.textContent?.trim() === "Close");
-      if (close instanceof HTMLButtonElement) close.click();
-    });
-    await new Promise((resolve) => setTimeout(resolve, 250));
-
-    const editPage = await browser.newPage();
-    const viewPage = await browser.newPage();
-    editPage.setDefaultTimeout(10_000);
-    viewPage.setDefaultTimeout(10_000);
-    editPage.on("pageerror", (error) => pageErrors.push(`edit: ${error.message}`));
-    viewPage.on("pageerror", (error) => pageErrors.push(`view: ${error.message}`));
-    editPage.on("console", (message) => { if (["error", "warning"].includes(message.type())) pageErrors.push(`edit ${message.type()}: ${message.text()}`); });
-    viewPage.on("console", (message) => { if (["error", "warning"].includes(message.type())) pageErrors.push(`view ${message.type()}: ${message.text()}`); });
-    await Promise.all([
-      editPage.goto(initialLinks.edit, { waitUntil: "domcontentloaded" }),
-      viewPage.goto(initialLinks.view, { waitUntil: "domcontentloaded" }),
-    ]);
-    try {
-      await Promise.all([
-        waitForBodyText(editPage, ["Connected with edit access", "AGENTS.md"], 25_000),
-        waitForBodyText(viewPage, ["Connected view-only", "AGENTS.md"], 25_000),
-      ]);
-    } catch (error) {
-      const [editBody, viewBody, ownerBody] = await Promise.all([editPage.evaluate(() => document.body.innerText), viewPage.evaluate(() => document.body.innerText), page.evaluate(() => document.body.innerText)]);
-      throw new Error(`${error.message}\nEdit:\n${editBody}\nView:\n${viewBody}\nOwner:\n${ownerBody}\nErrors:\n${pageErrors.join("\n")}\nServer:\n${serverLogs.join("")}`);
-    }
-    assert.equal(await viewPage.$('button[title="Review staged changes"]'), null);
-    assert.equal(await viewPage.$('button[title^="New Markdown"]'), null);
-    assert.equal(await viewPage.$('button[title^="Import Markdown"]'), null);
-    assert.equal(await viewPage.$eval(".cm-content", (element) => element.getAttribute("contenteditable")), "false");
-
-    await editPage.$eval('[aria-label="Open AGENTS.md"]', (element) => element.click());
-    await editPage.focus(".cm-content");
-    await editPage.keyboard.press("End");
-    await editPage.keyboard.type("\npeer edit");
-    await page.$eval('[aria-label="Open AGENTS.md"]', (element) => element.click());
-    await waitForBodyText(page, ["peer edit"], 10_000);
-
-    await viewPage.$eval('button[aria-label="Toggle discussion"]', (button) => button.click());
-    await viewPage.waitForSelector('input[aria-label="Discussion message"]');
-    await viewPage.focus('input[aria-label="Discussion message"]');
-    await viewPage.keyboard.type("view peer can discuss");
-    await viewPage.$eval('button[aria-label="Send discussion message"]', (button) => button.click());
-    await page.$eval('button[aria-label="Toggle discussion"]', (button) => button.click());
-    await waitForBodyText(page, ["view peer can discuss"], 10_000);
-    await page.$eval('button[aria-label="Close discussion"]', (button) => button.click());
-    await new Promise((resolve) => setTimeout(resolve, 250));
-
-    await page.$eval('button[aria-label="Open sharing session details"]', (button) => button.click());
-    await page.waitForSelector('#share-Edit-link');
-    await page.evaluate(() => {
-      const button = Array.from(document.querySelectorAll("button")).find((candidate) => candidate.textContent?.includes("Rotate links"));
-      if (!(button instanceof HTMLButtonElement)) throw new Error("Rotate links button not found");
-      button.click();
-    });
-    {
-      const deadline = Date.now() + 10_000;
-      while (await page.evaluate(() => document.querySelector('#share-Edit-link')?.value || "") === initialLinks.edit || !(await page.$('#share-Edit-link'))) {
-        if (Date.now() > deadline) throw new Error("Rotated edit link did not change.");
-        await new Promise((resolve) => setTimeout(resolve, 100));
-      }
-    }
-    await Promise.all([
-      waitForBodyMatch(editPage, /Owner session ended|Connection lost/, 10_000),
-      waitForBodyMatch(viewPage, /Owner session ended|Connection lost/, 10_000),
-    ]);
-    await page.evaluate(() => {
-      const button = Array.from(document.querySelectorAll("button")).find((candidate) => candidate.textContent?.includes("Stop session"));
-      if (button instanceof HTMLButtonElement) button.click();
-    });
-    await editPage.close();
-    await viewPage.close();
-
-    const unnamedButtons = await page.evaluate(() => Array.from(document.querySelectorAll("button")).filter((button) => {
-      const name = button.getAttribute("aria-label") || button.getAttribute("title") || button.textContent?.trim();
-      return !name;
-    }).map((button) => button.outerHTML));
-    assert.deepEqual(unnamedButtons, []);
-    await page.screenshot({ path: "/private/tmp/marktwin-workspace-attuned.png", fullPage: true });
-
-    await page.setViewport({ width: 390, height: 844, deviceScaleFactor: 1 });
-    await waitForBodyText(page, ["Document", "Discussion"], 5_000);
-    const mobileLayout = await page.evaluate(() => ({
-      viewport: window.innerWidth,
-      scrollWidth: document.documentElement.scrollWidth,
-      mainWidth: document.querySelector("main")?.getBoundingClientRect().width || 0,
-    }));
-    assert.equal(mobileLayout.scrollWidth <= mobileLayout.viewport, true);
-    assert.equal(mobileLayout.mainWidth >= 360, true);
-    await page.screenshot({ path: "/private/tmp/marktwin-workspace-mobile-attuned.png", fullPage: true });
-
-    for (const width of [768, 1024, 1440]) {
-      await page.setViewport({ width, height: 900, deviceScaleFactor: 1 });
-      const responsiveLayout = await page.evaluate(() => ({
-        viewport: window.innerWidth,
-        scrollWidth: document.documentElement.scrollWidth,
-        mainWidth: document.querySelector("main")?.getBoundingClientRect().width || 0,
-      }));
-      assert.equal(responsiveLayout.scrollWidth <= responsiveLayout.viewport, true, `workspace overflows at ${width}px`);
-      assert.equal(responsiveLayout.mainWidth >= 360, true, `workspace document is too narrow at ${width}px: ${responsiveLayout.mainWidth}px`);
-    }
-    await page.screenshot({ path: "/private/tmp/marktwin-workspace-desktop-attuned.png", fullPage: true });
-
-    const homePage = await browser.newPage();
-    await homePage.setViewport({ width: 390, height: 844, deviceScaleFactor: 1 });
-    try {
-      await homePage.goto(origin, { waitUntil: "domcontentloaded" });
-    } catch (error) {
-      throw new Error(`${error.message}\nServer exit: ${child.exitCode}, signal: ${child.signalCode}\n${serverLogs.join("")}`);
-    }
-    const homeLayout = await homePage.evaluate(() => ({ viewport: window.innerWidth, scrollWidth: document.documentElement.scrollWidth }));
-    assert.equal(homeLayout.scrollWidth <= homeLayout.viewport, true);
-    await homePage.screenshot({ path: "/private/tmp/marktwin-home-mobile-attuned.png", fullPage: true });
-    await homePage.close();
-
-    assert.deepEqual(forbiddenApiCalls, []);
-    assert.deepEqual(pageErrors, []);
-  } finally {
-    if (browser) {
-      let closed = false;
-      await Promise.race([
-        browser.close().then(() => { closed = true; }),
-        new Promise((resolve) => setTimeout(resolve, 3_000)),
-      ]);
-      if (!closed) browser.process()?.kill("SIGKILL");
-    }
-    child.kill("SIGTERM");
-    await new Promise((resolve) => {
-      if (child.exitCode !== null) return resolve();
-      child.once("exit", resolve);
-      setTimeout(resolve, 2_000).unref();
-    });
-    await rm(tempDirectory, { recursive: true, force: true });
-  }
+    await page.setViewport({ width: 1440, height: 1000 });
+    await page.screenshot({ path: join(tmpdir(), "marktwin-oss-workspace.png"), fullPage: true });
+    await page.goto(`${origin}/user`);
+    await bodyIncludes(page, "Collaboration profile");
+    await page.$eval('#display-name', input => { input.value = ''; });
+    await page.click('#display-name'); await page.keyboard.down(process.platform === 'darwin' ? 'Meta' : 'Control'); await page.keyboard.press('a'); await page.keyboard.up(process.platform === 'darwin' ? 'Meta' : 'Control'); await page.keyboard.type('Local Writer');
+    await clickText(page, "Save"); await bodyIncludes(page, "Profile saved.");
+    await page.reload(); await page.waitForSelector('#display-name');
+    assert.equal(await page.$eval('#display-name', input => input.value), 'Local Writer');
+    await page.click('[aria-label="Change profile color"]');
+    await page.click('[aria-label="Blue profile color"]');
+    await clickText(page, 'Save color');
+    await page.waitForFunction(() => !document.querySelector('[role="dialog"]'));
+    await page.reload();
+    const color = await page.evaluate(() => JSON.parse(localStorage.getItem('marktwin:local-profile')).appPreferences.avatarColorIndex);
+    assert.equal(color, 1);
+    assert.equal(await page.$$eval('img', images => images.length), 0);
+    assert.deepEqual(forbidden, []);
+    assert.deepEqual(errors, []);
+    assert.equal(logs.join('').includes('test-token'), false);
+    assert.equal(logs.join('').includes('Live editor change'), false);
+  } catch (error) {
+    const pages = await browser?.pages();
+    if (pages?.length) { await pages[1]?.screenshot({ path: join(tmpdir(), "marktwin-oss-failure.png") }).catch(() => {}); }
+    throw new Error(`${error.stack}\nBrowser errors: ${errors.join("\n")}\nRecent GitHub requests: ${JSON.stringify(fixture.requests.slice(-12))}`);
+  } finally { await browser?.close(); child.kill('SIGKILL'); }
 });

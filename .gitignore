@@ -8,3 +8,7 @@ dist
 !.env.example
 
 .claude/settings.local.json
+
+# Local-only Marktwin planning and model continuity.
+/.marktwin/
+/docs/ROADMAP.md

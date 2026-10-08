@@ -6,7 +6,9 @@ import type {
 } from "@/components/ui/toast"
 
 const TOAST_LIMIT = 1
-const TOAST_REMOVE_DELAY = 3000
+const TOAST_REMOVE_DELAY = 300
+export const DEFAULT_TOAST_DURATION = 4000
+export const DESTRUCTIVE_TOAST_DURATION = 8000
 
 type ToasterToast = ToastProps & {
   id: string
@@ -54,6 +56,17 @@ interface State {
 }
 
 const toastTimeouts = new Map<string, ReturnType<typeof setTimeout>>()
+const autoDismissTimeouts = new Map<string, ReturnType<typeof setTimeout>>()
+
+export function toastDurationForVariant(variant?: ToasterToast["variant"]) {
+  return variant === "destructive" ? DESTRUCTIVE_TOAST_DURATION : DEFAULT_TOAST_DURATION
+}
+
+function clearAutoDismiss(toastId: string) {
+  const timeout = autoDismissTimeouts.get(toastId)
+  if (timeout) clearTimeout(timeout)
+  autoDismissTimeouts.delete(toastId)
+}
 
 const addToRemoveQueue = (toastId: string) => {
   if (toastTimeouts.has(toastId)) {
@@ -114,11 +127,13 @@ export const reducer = (state: State, action: Action): State => {
     }
     case "REMOVE_TOAST":
       if (action.toastId === undefined) {
+        state.toasts.forEach((toast) => clearAutoDismiss(toast.id))
         return {
           ...state,
           toasts: [],
         }
       }
+      clearAutoDismiss(action.toastId)
       return {
         ...state,
         toasts: state.toasts.filter((t) => t.id !== action.toastId),
@@ -130,6 +145,15 @@ const listeners: Array<(state: State) => void> = []
 
 let memoryState: State = { toasts: [] }
 
+export function subscribeToToastState(listener: (state: State) => void) {
+  listeners.push(listener)
+  listener(memoryState)
+  return () => {
+    const index = listeners.indexOf(listener)
+    if (index > -1) listeners.splice(index, 1)
+  }
+}
+
 function dispatch(action: Action) {
   memoryState = reducer(memoryState, action)
   listeners.forEach((listener) => {
@@ -137,17 +161,41 @@ function dispatch(action: Action) {
   })
 }
 
+function dismissToast(toastId?: string) {
+  if (toastId) clearAutoDismiss(toastId)
+  else memoryState.toasts.forEach((item) => clearAutoDismiss(item.id))
+  dispatch({ type: "DISMISS_TOAST", toastId })
+}
+
+function scheduleAutoDismiss(toastId: string, duration: number) {
+  clearAutoDismiss(toastId)
+  if (!Number.isFinite(duration) || duration <= 0) return
+  autoDismissTimeouts.set(toastId, setTimeout(() => {
+    autoDismissTimeouts.delete(toastId)
+    dismissToast(toastId)
+  }, duration))
+}
+
 type Toast = Omit<ToasterToast, "id">
 
-function toast({ duration = 3000, ...props }: Toast) {
+function toast(props: Toast) {
   const id = genId()
+  const duration = props.duration ?? toastDurationForVariant(props.variant)
 
-  const update = (props: ToasterToast) =>
+  const update = (next: ToasterToast) => {
+    const nextDuration = next.duration ?? toastDurationForVariant(next.variant)
     dispatch({
       type: "UPDATE_TOAST",
-      toast: { ...props, id },
+      toast: { ...next, duration: nextDuration, id },
     })
-  const dismiss = () => dispatch({ type: "DISMISS_TOAST", toastId: id })
+    scheduleAutoDismiss(id, nextDuration)
+  }
+  const dismiss = () => dismissToast(id)
+
+  memoryState.toasts.forEach((item) => {
+    clearAutoDismiss(item.id)
+    addToRemoveQueue(item.id)
+  })
 
   dispatch({
     type: "ADD_TOAST",
@@ -161,6 +209,7 @@ function toast({ duration = 3000, ...props }: Toast) {
       },
     },
   })
+  scheduleAutoDismiss(id, duration)
 
   return {
     id: id,
@@ -173,19 +222,13 @@ function useToast() {
   const [state, setState] = React.useState<State>(memoryState)
 
   React.useEffect(() => {
-    listeners.push(setState)
-    return () => {
-      const index = listeners.indexOf(setState)
-      if (index > -1) {
-        listeners.splice(index, 1)
-      }
-    }
-  }, [state])
+    return subscribeToToastState(setState)
+  }, [])
 
   return {
     ...state,
     toast,
-    dismiss: (toastId?: string) => dispatch({ type: "DISMISS_TOAST", toastId }),
+    dismiss: dismissToast,
   }
 }
 

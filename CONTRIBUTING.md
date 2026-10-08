@@ -6,7 +6,7 @@ keep that in mind before sending large refactors.
 ## Getting started
 
 ```bash
-npm install
+npm ci
 npm run dev
 ```
 
@@ -20,9 +20,10 @@ WebRTC ICE servers).
 
 ```bash
 npm run verify
+npm audit --audit-level=low
 ```
 
-This runs TypeScript and a production build. There is no linter configured yet —
+This runs Node and Vitest unit suites, Chromium integration tests, TypeScript, a production build, and the client bundle check. There is no linter configured yet —
 match the surrounding code style.
 
 ## Guidelines
@@ -36,3 +37,5 @@ match the surrounding code style.
 ## Reporting bugs / requesting features
 
 Open a GitHub issue. For security issues, see [SECURITY.md](./SECURITY.md) instead.
+
+See [dependency maintenance](docs/DEPENDENCIES.md) for the security pins and CI checks.

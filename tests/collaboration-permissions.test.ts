@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import * as Y from "yjs";
 
-import { canEditSession } from "../client/src/lib/private-collab.ts";
+import { canEditSession } from "../client/src/lib/workspace-collab.ts";
 import {
   addMarkdownNote,
   assertWorkspaceWithinScopes,

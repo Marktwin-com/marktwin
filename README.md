@@ -10,125 +10,112 @@ Try it free at [marktwin.com](https://marktwin.com).
 
 If you have feedback or wish it did something more, let me know. It gives me another reason to procrastinate and work on it.
 
-## Why Marktwin Exists
+## What you can do
 
-- **GitHub-backed agent workspaces**: your Markdown files stay in repositories you control.
-- **Agent-workspace focus**: Marktwin opens `.agents` by default and lets you opt
-  into the repository root or other principal folders when they are useful.
-- **No Marktwin accounts**: use a GitHub personal access token or browser-side
-  GitHub OAuth PKCE.
-- **Private by design**: document content and GitHub credentials are not stored
-  by the Marktwin server.
-- **Scoped P2P collaboration**: share the selected workspace through separate
-  edit and view-only links. View peers can discuss but cannot change documents;
-  only the owner can review and publish to GitHub.
-- **Reviewable work**: additions, edits, moves, renames, deletions, and captured
-  decisions remain staged with Undo/Discard controls until owner review.
-- **Conflict-safe GitHub sync**: Marktwin checks the current branch head before
-  publishing one atomic workspace commit, and saves work to a new branch instead
-  of silently overwriting a conflicting remote change.
-- **Browser-private export**: Print / Save as PDF creates a sanitized print view
-  locally; private Markdown never goes to a Marktwin PDF endpoint.
-- **Self-hostable**: the backend is a small Node/Express server for static
-  serving and ephemeral WebRTC signaling only.
+- Edit Markdown and other supported text files, JSON Canvas boards, and Excalidraw drawings in GitHub-backed Cabinets.
+- Search files and content, capture ideas, connect artifacts, and record decisions alongside the work.
+- Collaborate through encrypted WebRTC sessions with separate editor and viewer invitations, chat, and presence. Only the owner publishes to GitHub.
+- Review staged changes and publish one Git commit with **Checkpoint**. Non-overlapping changes can merge automatically; conflicts remain available for explicit review.
+- Recover unfinished drafts from browser-local IndexedDB. Recovery is enabled by default and can be disabled or cleared in Cabinet settings.
+- Choose themes, languages, editor preferences, and a local collaboration name and color.
+- Print Markdown or save it as PDF in the browser without uploading it to a rendering service.
 
-Read the full privacy boundary in [docs/PRIVACY.md](./docs/PRIVACY.md) and the
-system architecture in [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md).
+## Self-hosted architecture
 
-## Project Status
+This edition needs no Marktwin account, database, email provider, or hosted service.
+The Node/Express server serves the app and provides ephemeral WebRTC signaling.
+GitHub credentials stay in browser session storage; private repository contents
+move directly between the browser and GitHub or encrypted collaboration peers.
+Saved Cabinets and preferences stay in local storage. Product telemetry is disabled.
 
-Marktwin is usable, but still early. The core privacy model is the part of the
-project that should remain stable: private notes, GitHub tokens, invite secrets,
-chat content, and collaboration payloads must not become readable by Marktwin
-servers.
+See [architecture](docs/ARCHITECTURE.md) and [privacy](docs/PRIVACY.md).
 
-See [docs/ROADMAP.md](./docs/ROADMAP.md) for planned work.
+## Requirements and quick start
 
-## Requirements
-
-- Node.js >=20.19.0
-- npm >=10
-- A GitHub repository containing Markdown files, or a token permitted to create
-  a private repository
-
-No database, queue, object store, or account provider is required.
-
-## Quick Start
+- Node.js **22.12 or newer** (Node 22 LTS is used in CI)
+- npm **10 or newer**
+- A modern browser: Safari 16.4+, Chrome 111+, or Firefox 128+
+- A GitHub repository and a token with the required repository permissions
 
 ```bash
-npm install
+npm ci
 npm run dev
 ```
 
-Open `http://localhost:5001`, connect a repository in `owner/repo` format, and
-use configured GitHub OAuth or the advanced personal-access-token path. The
-credential needs repository Contents read/write access. Marktwin initially
-loads only `.agents`; use the folder selector to add
-`Main path` (root-level Markdown) or another top-level folder. Edits, file
-operations, captured decisions, and Markdown imports remain staged until the
-owner reviews Changes and confirms Sync.
+Open `http://localhost:5001`. The root URL opens Cabinets directly. Add an
+`owner/repository` connection, open it, and enter a GitHub personal access token.
+Choose the branch and repository scopes when first configuring the Cabinet.
+Marktwin prefers `.agents` when available; otherwise it offers the repository
+root. **Main path includes the repository and its descendant folders**.
+Markdown/text, Canvas, and Drawing are always available; images and other assets
+follow the workspace configuration.
 
-To create the recommended fine-grained GitHub token, see
-[docs/TUTORIAL.md](./docs/TUTORIAL.md).
+Edits remain staged until Checkpoint unless you explicitly enable automatic sync.
+A fine-grained token needs Contents read/write for publishing. Creating a missing
+private repository also needs Administration write; see the [token tutorial](docs/TUTORIAL.md).
 
 ## Configuration
 
-Marktwin runs without a `.env` file. Optional settings are documented in
-[.env.example](./.env.example).
+Copy [.env.example](.env.example) to `.env` if you need overrides. Default local
+startup requires no configuration.
 
-Common optional production setting:
+- `PORT`: application port, default `5001`.
+- `HMR_HOST`: optional development reverse-proxy override.
+- `VITE_GITHUB_OAUTH_CLIENT_ID`: preserves the optional browser OAuth PKCE path.
+  It requires a provider configuration that supports browser token exchange.
+  Without it, the UI offers the PAT flow. There is no server OAuth proxy or client secret.
+- `VITE_STUN_URLS`, `VITE_TURN_URLS`, `VITE_TURN_USERNAME`,
+  `VITE_TURN_CREDENTIAL`, or `VITE_WEBRTC_ICE_SERVERS`: optional ICE configuration.
+  These are browser-visible build settings; never put a TURN shared signing secret in them.
 
-```bash
-PORT=5001
-VITE_GITHUB_OAUTH_CLIENT_ID=your_github_oauth_client_id
-```
+TURN is not required to start the app, but many network combinations require a
+relay for reliable collaboration. Use a relay you operate or trust and configure
+appropriate access limits. The app does not contact the hosted Marktwin ICE API.
+Rebuild after changing `VITE_*` values.
 
-Without an OAuth client ID, Marktwin truthfully presents the PAT flow as the
-available connection method. Fine-grained tokens need Contents read/write;
-creating a missing private repository also needs Administration write.
-
-## Production Build
+## Production
 
 ```bash
 npm run build
 npm start
 ```
 
-Marktwin needs a long-running Node process because `/signal` uses WebSockets for
-ephemeral peer discovery. A VM, VPS, container host, Fly.io, Render, or similar
-Node-capable platform works. A pure static host or short-lived serverless
-function host is not enough for collaboration.
+Use HTTPS and a long-running Node process with WebSocket upgrades for `/signal`.
+A static-only host or short-lived function cannot provide signaling. Configure
+TURN before relying on collaboration across different networks. The production
+server does not require PostgreSQL or hosted account configuration.
 
-For production collaboration reliability, configure TURN/STUN servers through
-the WebRTC environment variables in [.env.example](./.env.example).
-
-## Development
+## Development and validation
 
 ```bash
-npm test
-npm run check
-npm run build
 npm run verify
 ```
 
-`npm run verify` is the public release gate and runs the Node test suite,
-TypeScript, and a production build. There is no linter configured yet; match the
-surrounding code style.
+This runs the public Node unit tests, ported Vitest suites, Chromium integration
+checks, TypeScript, a production build, and the initial-bundle budget check.
+Browser tests use an in-memory GitHub fixture; they do not publish real commits.
+`npm ci` uses the checked-in peer-resolution setting to avoid npm 10's resolver
+failure with this dependency graph.
 
-## Security
+## Upgrading existing installations
 
-The most important invariant is simple: GitHub tokens and private document data
-must not be sent to or stored by the Marktwin server.
+Saved Cabinets are upgraded locally without changing their IDs, branches, or
+selected scopes. Existing Cabinet URLs and session token keys remain supported.
+New configuration fields get conservative defaults: automatic sync is off unless
+already enabled. The new Main path scope includes descendants; review the scope
+selection if an older installation used it only for root-level Markdown files.
+Save or publish work in old open tabs before reloading into the new edition;
+live sessions should use matching application versions.
 
-Report vulnerabilities privately using [SECURITY.md](./SECURITY.md). Do not open
-public issues for security reports.
+## Contributing and security
 
-## Contributing
-
-Contributions are welcome when they preserve the privacy model and keep changes
-focused. Start with [CONTRIBUTING.md](./CONTRIBUTING.md), then open a pull
-request using the project template.
+Project planning is maintained privately by the owner. Feature requests and
+implementation proposals belong in [GitHub Issues](https://github.com/OptimAI-labs/marktwin/issues).
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+Report vulnerabilities privately using [SECURITY.md](SECURITY.md).
 
 ## License
 
-GPL-3.0-or-later. See [LICENSE](./LICENSE).
+GPL-3.0-or-later. See [LICENSE](LICENSE).
+
+Dependency updates and security checks are documented in [dependency maintenance](docs/DEPENDENCIES.md).

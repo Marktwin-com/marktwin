@@ -43,48 +43,36 @@ We highly recommend using a **Fine-grained Personal Access Token** because it li
 
 ---
 
-## 3️⃣ Linking Your Repo in Marktwin
+## 3. Connect a Cabinet
 
-Now that you have your token, you can load your workspace into Marktwin. There
-is no Marktwin account — the app opens directly to **Agent workspaces**.
+Open Marktwin and choose **New Cabinet**. Enter `owner/repository`, then open the
+saved Cabinet and enter your GitHub token. The token stays in session storage.
+Select a branch and scopes in the configuration dialog. `.agents` is preferred
+when present; **Main path** includes the repository and descendant folders.
+Markdown/text, Canvas, and Drawing are available alongside configured assets.
 
-1. Click **Connect repository**.
-2. In the **Repository** field, enter your repo in the `owner/repo` format (for example, if your GitHub username is `nathalia` and your repo is `my-notes`, you would type `nathalia/my-notes`).
-3. In the **Default branch** field, enter the branch you want to read/write from (usually `main`).
-4. Click **Continue**.
-5. Use **Continue with GitHub** when OAuth is configured, or expand the advanced
-   personal-access-token option, paste your PAT, and click **Validate and open**.
+For a missing repository, the app can create a private repository under the
+GitHub user authenticated by your token. Creation requires Administration write
+in addition to Contents write. Review the request before creating it.
 
-Marktwin validates the repository and branch directly with GitHub before
-opening it. If the repository is missing or inaccessible, you can cancel or
-create a private repository under the authenticated personal account. A created
-repository is initialized with `.agents/README.md`.
+## 4. Edit and checkpoint
 
-Only Markdown (`.md`) is managed in the workspace. On first open, Marktwin selects
-`.agents` only. Use **Folders** to add **Main path** for root-level files such as
-`README.md`, or another top-level folder; selecting one includes its Markdown
-subfolders. Folder choices are remembered locally per workspace.
+Create or open a file and edit it. Use search, quick capture, artifact links,
+decisions, Canvas, and drawings to organize the work. The GitHub icon shows staged
+changes. Click it to review the changes, enter a message, and **Checkpoint**.
+Automatic sync is off by default and can be enabled in Cabinet settings.
 
-Changes are local and peer-to-peer until the owner opens **Changes**, inspects
-the staged paths and content, optionally undoes/discards work, supplies a commit
-message, and confirms **Sync**. Marktwin then publishes additions, edits, moves,
-renames, deletions, and captured decisions together in one Git commit. If the
-GitHub branch advanced, the commit is preserved on a new `*-marktwin-*` branch
-and the workspace switches to it.
+Checkpoint checks for remote changes. Non-overlapping changes can merge;
+conflicts open a resolver rather than overwriting remote work. Failed publication
+keeps your local draft. Recovery copies are stored in IndexedDB by default and
+can be disabled or removed in Cabinet settings.
 
-Use **Start sharing session** for fresh edit and view-only links. Both roles can
-join Discussion; only edit peers can change Markdown, and only the owner can
-publish. **Capture decision** turns an ephemeral discussion message into a
-staged Markdown entry. Stop the session when finished or rotate links to revoke
-the previous pair.
+## 5. Collaborate and print
 
----
+Use **More Cabinet actions → Start sharing session** for separate edit and view
+links. Share only the intended link. View peers can read and chat; edit peers can
+change the workspace; only the owner publishes to GitHub. Rotate links or stop
+the session when needed. All participants should use matching app versions.
 
-## 4️⃣ About Your Saved Setup
-
-The repository name and branch you entered are saved in this browser's
-`localStorage`, so you don't have to retype them next time.
-
-*(Note: For your security, Marktwin will **never** save your token. It's kept in
-this browser tab's session storage only — you'll need to paste it again in a
-fresh tab.)*
+For Markdown, **More Cabinet actions → Print / Save as PDF** opens a sanitized
+browser print view. Private content is never uploaded to a PDF service.
