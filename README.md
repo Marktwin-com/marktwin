@@ -110,7 +110,7 @@ live sessions should use matching application versions.
 ## Contributing and security
 
 Project planning is maintained privately by the owner. Feature requests and
-implementation proposals belong in [GitHub Issues](https://github.com/OptimAI-labs/marktwin/issues).
+implementation proposals belong in [GitHub Issues](https://github.com/Marktwin-com/marktwin/issues).
 See [CONTRIBUTING.md](CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 Report vulnerabilities privately using [SECURITY.md](SECURITY.md).
 

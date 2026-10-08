@@ -8,10 +8,10 @@
   "packageManager": "npm@10.9.4",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/OptimAI-labs/marktwin.git"
+    "url": "git+https://github.com/Marktwin-com/marktwin.git"
   },
   "bugs": {
-    "url": "https://github.com/OptimAI-labs/marktwin/issues"
+    "url": "https://github.com/Marktwin-com/marktwin/issues"
   },
   "homepage": "https://marktwin.com",
   "keywords": [

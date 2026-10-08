@@ -61,7 +61,7 @@ export default function Layout({ children, mainClassName = "pt-12", zoom, hideNa
             {" "} | {" "}
             <Link href="/contact" className="hover:text-[hsl(var(--primary))] hover:underline">{t("footer.contact")}</Link>
             {" "} | {" "}
-            <a href="https://github.com/OptimAI-labs/marktwin" className="hover:underline">Source code</a>
+            <a href="https://github.com/Marktwin-com/marktwin" className="hover:underline">Source code</a>
           </p>
         </div>
       </footer>}

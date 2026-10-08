@@ -36,7 +36,7 @@ export default function UserSettings() {
       <Card><CardHeader><CardTitle>{t("user.languageTitle")}</CardTitle></CardHeader><CardContent><LanguagePicker /></CardContent></Card>
       <Card><CardHeader><CardTitle>GitHub credentials</CardTitle><CardDescription>Credentials are kept only in this browser session. Forgetting them leaves your Cabinets and recovery drafts intact.</CardDescription></CardHeader><CardContent><Button variant="outline" onClick={() => { clearGitHubSessionCredentials(); setMessage("GitHub credentials forgotten for this session."); }}>Forget GitHub credentials</Button></CardContent></Card>
       <p role="status">{message}</p>
-      <a className="text-sm underline" href="https://github.com/OptimAI-labs/marktwin/issues">Feedback and feature requests</a>
+      <a className="text-sm underline" href="https://github.com/Marktwin-com/marktwin/issues">Feedback and feature requests</a>
     </div>
     <AvatarPickerDialog open={avatarOpen} onOpenChange={setAvatarOpen} identity={identity} avatar={avatar} onSave={value => updateAppPreferences({ avatarColorIndex: value.colorIndex })} />
   </Layout>;

@@ -7,6 +7,6 @@ export default function PrivacyPage() {
     <section className="space-y-2"><h2 className="text-xl font-semibold">Collaboration</h2><p>The application server temporarily relays WebRTC negotiation data. Workspace content and chat travel through encrypted peer connections. Configured STUN and TURN services can observe connection metadata; a TURN relay carries encrypted traffic without the document key. Invite secrets stay in URL fragments.</p></section>
     <section className="space-y-2"><h2 className="text-xl font-semibold">Requests and logs</h2><p>Your hosting provider and reverse proxy may retain access logs. Application logs omit query values and do not record private request bodies or collaboration payloads. Font providers may receive normal font-resource requests. Print / Save as PDF runs locally with external resources blocked.</p></section>
     <p>Deployment-specific privacy terms and contact details are the responsibility of the operator hosting this instance. The hosted service at marktwin.com has its own policies.</p>
-    <a className="underline" href="https://github.com/OptimAI-labs/marktwin/blob/main/docs/PRIVACY.md">Source documentation</a>
+    <a className="underline" href="https://github.com/Marktwin-com/marktwin/blob/main/docs/PRIVACY.md">Source documentation</a>
   </article></Layout>;
 }

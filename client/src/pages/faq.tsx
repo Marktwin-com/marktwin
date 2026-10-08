@@ -45,7 +45,7 @@ export default function FAQPage() {
                 <span className="inline-flex items-center gap-2 rounded-full bg-[hsl(var(--obsidian-sidebar)/0.72)] px-3 py-2 marktwin-control-shadow"><Users className="h-4 w-4 text-[hsl(var(--obsidian-accent))]" aria-hidden="true" /> {t("faq.collaborationLabel")}</span>
               </div>
             </div>
-            <a href="https://github.com/OptimAI-labs/marktwin/issues" className="mt-8 inline-flex items-center gap-2 text-sm font-medium text-[hsl(var(--primary))] hover:underline">
+            <a href="https://github.com/Marktwin-com/marktwin/issues" className="mt-8 inline-flex items-center gap-2 text-sm font-medium text-[hsl(var(--primary))] hover:underline">
               {t("faq.contactButton")} <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
             </a>
           </div>
